@@ -212,6 +212,21 @@ app.post('/api/auth/send-pin', wrap(async (req, res) => {
   }
 
   const pin = generatePin();
+
+  // Try to send the email FIRST. Only persist the PIN if delivery succeeded,
+  // so a failed send doesn't lock the user out via the resend cooldown.
+  try {
+    await sendPinEmail(lower, pin);
+  } catch (err) {
+    console.error('sendPinEmail failed:', err && err.message ? err.message : err);
+    const hint = /invalid login|auth|535|credentials/i.test(String(err && err.message))
+      ? 'Email credentials were rejected — check SMTP_USER/SMTP_PASS (use a Gmail App Password, not your regular password).'
+      : /timeout|timed out/i.test(String(err && err.message))
+      ? 'Email server did not respond. Check SMTP_HOST/SMTP_PORT and that outbound SMTP is allowed.'
+      : 'Could not send verification email. Please try again shortly.';
+    return res.status(502).json({ error: hint });
+  }
+
   const pinHash = await bcrypt.hash(pin, 10);
   await pool.query(
     `INSERT INTO email_pins (email, pin_hash, attempts, created_at)
@@ -219,13 +234,6 @@ app.post('/api/auth/send-pin', wrap(async (req, res) => {
      ON CONFLICT (email) DO UPDATE SET pin_hash = EXCLUDED.pin_hash, attempts = 0, created_at = NOW()`,
     [lower, pinHash]
   );
-
-  try {
-    await sendPinEmail(lower, pin);
-  } catch (err) {
-    console.error('sendPinEmail failed:', err);
-    return res.status(502).json({ error: 'Could not send verification email. Please try again shortly.' });
-  }
 
   res.json({ ok: true, email: lower, expiresInSec: PIN_TTL_MS / 1000, devMode: !smtpEnabled });
 }));

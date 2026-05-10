@@ -17,16 +17,22 @@ let transporter = null;
 let smtpEnabled = false;
 
 if (HOST && USER && PASS) {
+  // Gmail App Passwords have spaces when copied — strip them.
+  const cleanPass = String(PASS).replace(/\s+/g, '');
   transporter = nodemailer.createTransport({
     host: HOST,
     port: PORT,
     secure: SECURE,
-    auth: { user: USER, pass: PASS },
+    auth: { user: USER, pass: cleanPass },
+    // Aggressive timeouts so a misconfigured SMTP server can't hang requests.
+    connectionTimeout: 10_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 15_000,
   });
   smtpEnabled = true;
   transporter.verify().then(
     () => console.log(`✓ SMTP ready: ${HOST}:${PORT} as ${USER}`),
-    (err) => console.warn(`⚠️  SMTP transport failed verification: ${err.message}`)
+    (err) => console.warn(`⚠️  SMTP transport verification failed: ${err.message}\n   Hint: for Gmail, ensure 2FA is on and you're using an App Password (not your regular password).`)
   );
 } else {
   console.warn('⚠️  SMTP not configured (set SMTP_HOST, SMTP_USER, SMTP_PASS). Falling back to console logging — verification PINs will be printed to the server logs.');
@@ -69,13 +75,18 @@ async function sendPinEmail(to, pin) {
     console.log(`\n  ✉  [DEV MODE] PIN for ${to}: ${pin}\n     (Configure SMTP env vars to send real emails)\n`);
     return { dev: true, pin };
   }
-  const info = await transporter.sendMail({
+  // Hard ceiling so a stuck SMTP server can't tie up an API request.
+  const sendPromise = transporter.sendMail({
     from: FROM,
     to,
     subject: `Your Flora & Gifts verification code: ${pin}`,
     text: `Welcome to Flora & Gifts.\n\nYour verification code is: ${pin}\n\nIt expires in 10 minutes. If you didn't request this, you can ignore this email.\n\n— Flora & Gifts`,
     html: pinEmailHtml(pin, to),
   });
+  const info = await Promise.race([
+    sendPromise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP send timed out after 15s')), 15_000)),
+  ]);
   console.log(`✉  Sent PIN to ${to} (messageId: ${info.messageId})`);
   return { sent: true, messageId: info.messageId };
 }

@@ -12,6 +12,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const { sendPinEmail, smtpEnabled } = require('./db/mailer');
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'flora-dev-secret-change-me-in-production';
@@ -40,7 +41,14 @@ async function initDb() {
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'user',
+      email_verified BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS email_pins (
+      email TEXT PRIMARY KEY,
+      pin_hash TEXT NOT NULL,
+      attempts INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
@@ -81,6 +89,9 @@ async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+
+  // Schema upgrade for older deployments — add email_verified column if missing
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE`);
   console.log('✓ Schema ready');
 
   const adminEmail = 'admin@flora.com';
@@ -88,10 +99,13 @@ async function initDb() {
   if (!adminCheck.rows.length) {
     const hash = await bcrypt.hash('admin123', 10);
     await pool.query(
-      "INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'admin')",
+      "INSERT INTO users (name, email, password_hash, role, email_verified) VALUES ($1, $2, $3, 'admin', TRUE)",
       ['Admin User', adminEmail, hash]
     );
     console.log('✓ Seeded admin user (admin@flora.com / admin123)');
+  } else {
+    // Make sure the seeded admin is always considered verified
+    await pool.query("UPDATE users SET email_verified = TRUE WHERE email = $1 AND email_verified = FALSE", [adminEmail]);
   }
 
   const productCount = await pool.query('SELECT COUNT(*)::int AS c FROM products');
@@ -158,23 +172,117 @@ app.get('/api/health', wrap(async (req, res) => {
 }));
 
 // ─── AUTH ROUTES ────────────────────────────────────────────────────
+const PIN_TTL_MS = 10 * 60 * 1000;       // 10 minutes
+const PIN_RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds between sends
+const PIN_MAX_ATTEMPTS = 5;
+
 function makeToken(u) {
   return jwt.sign({ id: u.id, name: u.name, email: u.email, role: u.role }, JWT_SECRET, { expiresIn: '7d' });
 }
 
-app.post('/api/auth/register', wrap(async (req, res) => {
-  const { name, email, password } = req.body || {};
-  if (!name || !email || !password) return res.status(400).json({ error: 'Name, email, and password are required' });
-  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+function generatePin() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function isValidEmail(s) {
+  return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+/** POST /api/auth/send-pin
+ *  Body: { email }
+ *  Stores a 10-minute, single-use PIN keyed by email (case-insensitive) and
+ *  emails it to the address. Rate-limited to 1 send per 30 seconds. */
+app.post('/api/auth/send-pin', wrap(async (req, res) => {
+  const { email } = req.body || {};
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'A valid email is required' });
   const lower = email.toLowerCase().trim();
-  const exists = await pool.query('SELECT id FROM users WHERE email=$1', [lower]);
-  if (exists.rows.length) return res.status(409).json({ error: 'Email is already registered' });
-  const hash = await bcrypt.hash(password, 10);
-  const { rows } = await pool.query(
-    "INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'user') RETURNING id, name, email, role",
-    [name.trim(), lower, hash]
+
+  const exists = await pool.query('SELECT email_verified FROM users WHERE email=$1', [lower]);
+  if (exists.rows.length && exists.rows[0].email_verified) {
+    return res.status(409).json({ error: 'This email is already registered. Try logging in.' });
+  }
+
+  const recent = await pool.query('SELECT created_at FROM email_pins WHERE email=$1', [lower]);
+  if (recent.rows.length) {
+    const ms = Date.now() - new Date(recent.rows[0].created_at).getTime();
+    if (ms < PIN_RESEND_COOLDOWN_MS) {
+      const wait = Math.ceil((PIN_RESEND_COOLDOWN_MS - ms) / 1000);
+      return res.status(429).json({ error: `Please wait ${wait}s before requesting another code.` });
+    }
+  }
+
+  const pin = generatePin();
+  const pinHash = await bcrypt.hash(pin, 10);
+  await pool.query(
+    `INSERT INTO email_pins (email, pin_hash, attempts, created_at)
+     VALUES ($1, $2, 0, NOW())
+     ON CONFLICT (email) DO UPDATE SET pin_hash = EXCLUDED.pin_hash, attempts = 0, created_at = NOW()`,
+    [lower, pinHash]
   );
-  const user = rows[0];
+
+  try {
+    await sendPinEmail(lower, pin);
+  } catch (err) {
+    console.error('sendPinEmail failed:', err);
+    return res.status(502).json({ error: 'Could not send verification email. Please try again shortly.' });
+  }
+
+  res.json({ ok: true, email: lower, expiresInSec: PIN_TTL_MS / 1000, devMode: !smtpEnabled });
+}));
+
+/** POST /api/auth/register
+ *  Body: { name, email, password, pin }
+ *  Requires a valid recent PIN. Creates the user as email_verified=TRUE
+ *  and returns a JWT. */
+app.post('/api/auth/register', wrap(async (req, res) => {
+  const { name, email, password, pin } = req.body || {};
+  if (!name || !email || !password || !pin) return res.status(400).json({ error: 'Name, email, password, and verification code are required' });
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (!/^\d{6}$/.test(String(pin))) return res.status(400).json({ error: 'Verification code must be 6 digits' });
+  const lower = email.toLowerCase().trim();
+
+  const exists = await pool.query('SELECT id, email_verified FROM users WHERE email=$1', [lower]);
+  if (exists.rows.length && exists.rows[0].email_verified) {
+    return res.status(409).json({ error: 'Email is already registered' });
+  }
+
+  const pinRow = await pool.query('SELECT pin_hash, attempts, created_at FROM email_pins WHERE email=$1', [lower]);
+  if (!pinRow.rows.length) return res.status(400).json({ error: 'No verification code on file. Please request a new one.' });
+
+  const { pin_hash, attempts, created_at } = pinRow.rows[0];
+  if (Date.now() - new Date(created_at).getTime() > PIN_TTL_MS) {
+    await pool.query('DELETE FROM email_pins WHERE email=$1', [lower]);
+    return res.status(400).json({ error: 'Verification code has expired. Please request a new one.' });
+  }
+  if (attempts >= PIN_MAX_ATTEMPTS) {
+    await pool.query('DELETE FROM email_pins WHERE email=$1', [lower]);
+    return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new code.' });
+  }
+
+  const pinOk = await bcrypt.compare(String(pin), pin_hash);
+  if (!pinOk) {
+    await pool.query('UPDATE email_pins SET attempts = attempts + 1 WHERE email=$1', [lower]);
+    return res.status(400).json({ error: 'Incorrect verification code' });
+  }
+
+  await pool.query('DELETE FROM email_pins WHERE email=$1', [lower]);
+
+  const hash = await bcrypt.hash(password, 10);
+  let user;
+  if (exists.rows.length) {
+    // User existed but was unverified — update their password + mark verified
+    const upd = await pool.query(
+      "UPDATE users SET name=$1, password_hash=$2, email_verified=TRUE WHERE email=$3 RETURNING id, name, email, role",
+      [name.trim(), hash, lower]
+    );
+    user = upd.rows[0];
+  } else {
+    const ins = await pool.query(
+      "INSERT INTO users (name, email, password_hash, role, email_verified) VALUES ($1, $2, $3, 'user', TRUE) RETURNING id, name, email, role",
+      [name.trim(), lower, hash]
+    );
+    user = ins.rows[0];
+  }
   res.json({ user, token: makeToken(user) });
 }));
 
@@ -186,12 +294,13 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   if (!rows.length) return res.status(401).json({ error: 'Invalid email or password' });
   const ok = await bcrypt.compare(password, rows[0].password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
+  if (!rows[0].email_verified) return res.status(403).json({ error: 'Email not verified yet. Please complete signup with the code we sent you.' });
   const user = { id: rows[0].id, name: rows[0].name, email: rows[0].email, role: rows[0].role };
   res.json({ user, token: makeToken(user) });
 }));
 
 app.get('/api/auth/me', auth(true), wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT id, name, email, role FROM users WHERE id=$1', [req.user.id]);
+  const { rows } = await pool.query('SELECT id, name, email, role, email_verified FROM users WHERE id=$1', [req.user.id]);
   if (!rows.length) return res.status(404).json({ error: 'User not found' });
   res.json({ user: rows[0] });
 }));

@@ -5,6 +5,7 @@ An artisanal botanical boutique — full-stack web app with a refined Material 3
 ## Features
 
 - **Real authentication** — bcrypt-hashed passwords, JWT-based sessions, role-based access (`user` / `admin`)
+- **Email PIN verification on signup** — 6-digit code, 10-min TTL, 30-sec resend cooldown, max 5 attempts, branded HTML email template, works with Gmail/Resend/SendGrid/Brevo or any SMTP
 - **Live database** — Postgres-backed users, products, orders, and reservations
 - **9 dedicated pages** — Home, Shop, Product detail, Cart, Checkout, Events, Auth, Orders, Admin
 - **Live admin dashboard** — stats, orders (with status updates), reservations, users, and product CRUD
@@ -56,8 +57,9 @@ flora-gifts/
 | Method | Path                              | Auth   | Description                            |
 | ------ | --------------------------------- | ------ | -------------------------------------- |
 | GET    | `/api/health`                     | —      | DB ping                                |
-| POST   | `/api/auth/register`              | —      | Create account                         |
-| POST   | `/api/auth/login`                 | —      | Issue JWT                              |
+| POST   | `/api/auth/send-pin`              | —      | Email a 6-digit verification code      |
+| POST   | `/api/auth/register`              | —      | Verify PIN + create account            |
+| POST   | `/api/auth/login`                 | —      | Issue JWT (requires verified email)    |
 | GET    | `/api/auth/me`                    | user   | Current user                           |
 | GET    | `/api/products`                   | —      | List all products                      |
 | GET    | `/api/products/:id`               | —      | One product                            |
@@ -96,12 +98,34 @@ npm start
 
 Open <http://localhost:3000>. Schema and seed data are created automatically on first run.
 
+## Email PIN verification
+
+When a new user clicks **Register**, they enter name + email + password and are sent a 6-digit code by email. After entering the code, the account is created and they're logged in. The seeded admin (`admin@flora.com`) is pre-verified and bypasses this step.
+
+The mailer is configured entirely via env vars (no code changes required) and supports any SMTP provider. See `.env.example` for ready-to-paste settings for **Gmail (App Password)**, **Resend**, **SendGrid**, and **Brevo**.
+
+If SMTP isn't configured, the server logs PINs to the console so you can still test the flow locally:
+
+```
+✉  [DEV MODE] PIN for someone@example.com: 482910
+```
+
+Security guards baked in:
+- PIN hashed with bcrypt at rest
+- 10-minute TTL
+- 30-second cooldown between resend requests
+- Max 5 incorrect attempts before the code is invalidated
+- 401-clearing on login if email isn't verified
+
 ## Deploy to Railway
 
 1. Push this repo to GitHub.
 2. In Railway, create a new project → **Deploy from GitHub repo** → pick this repo.
 3. Add the **Postgres** plugin to the project. Railway will inject `DATABASE_URL` automatically.
-4. Under **Variables**, add `JWT_SECRET` (a long random string).
+4. Under **Variables**, add:
+   - `JWT_SECRET` — a long random string (e.g. `openssl rand -hex 48`)
+   - `NODE_ENV=production`
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` — see `.env.example` for provider-specific values
 5. Railway auto-detects Node and runs `npm start`. The healthcheck at `/api/health` will go green once the DB is reachable.
 
 That's it — admin@flora.com / admin123 is seeded on first boot.

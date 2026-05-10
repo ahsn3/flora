@@ -58,6 +58,7 @@
   }
 
   const Api = {
+    sendPin:  (body) => api('/api/auth/send-pin', { method: 'POST', body }),
     register: (body) => api('/api/auth/register', { method: 'POST', body }),
     login:    (body) => api('/api/auth/login',    { method: 'POST', body }),
     me:       ()     => api('/api/auth/me'),
@@ -849,11 +850,34 @@
   }
 
   // ─── PAGE: AUTH ───────────────────────────────────────────────
-  let authMode = 'login';
+  let authMode = 'login'; // 'login' | 'register' | 'verify'
+  let pendingRegistration = null; // { name, email, password, sentAt }
+  let resendTimer = null;
+
+  function startResendCountdown(sec) {
+    clearInterval(resendTimer);
+    const btn = document.getElementById('resendBtn');
+    if (!btn) return;
+    let remaining = sec;
+    const tick = () => {
+      if (remaining <= 0) {
+        btn.disabled = false;
+        btn.textContent = 'Resend code';
+        clearInterval(resendTimer);
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = `Resend in ${remaining}s`;
+      remaining -= 1;
+    };
+    tick();
+    resendTimer = setInterval(tick, 1000);
+  }
 
   function renderAuth() {
     const el = document.getElementById('authContent');
     if (!el) return;
+    clearInterval(resendTimer);
     if (currentUser) {
       el.innerHTML = `
         <div class="max-w-md mx-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-8 md:p-10 reveal">
@@ -864,10 +888,76 @@
           ${currentUser.role === 'admin' ? `<a class="w-full bg-secondary text-on-secondary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition mb-3 block text-center" href="admin.html">Admin Dashboard</a>` : ''}
           <button class="w-full border border-outline-variant/40 text-on-surface-variant py-3 rounded-lg font-label text-label-sm hover:border-primary hover:text-primary transition" id="logoutBtn">Logout</button>
         </div>`;
-      document.getElementById('logoutBtn').addEventListener('click', () => doLogout());
+      bindLogoutButtons();
       applyReveal();
       return;
     }
+
+    // PIN verification step (after register details submitted)
+    if (authMode === 'verify' && pendingRegistration) {
+      const masked = pendingRegistration.email;
+      el.innerHTML = `
+        <div class="max-w-md mx-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-8 md:p-10 reveal">
+          <button class="font-label text-label-sm text-on-surface-variant hover:text-primary transition mb-6 inline-flex items-center gap-2" id="backToRegBtn">
+            <span class="material-symbols-outlined text-[18px]">arrow_back</span> Back
+          </button>
+          <span class="material-symbols-outlined text-5xl text-primary mb-4 block text-center">mark_email_read</span>
+          <h2 class="font-display text-headline-md text-primary text-center mb-2">Check your email</h2>
+          <p class="text-center text-on-surface-variant mb-6">We sent a 6-digit verification code to<br/><strong class="text-on-surface">${masked}</strong></p>
+          <label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2 text-center">Verification Code</label>
+          <input class="w-full bg-surface-container-low border border-outline-variant/40 p-4 rounded-lg focus:outline-none focus:border-primary text-center font-display text-2xl tracking-[0.4em]" id="aPin" placeholder="000000" inputmode="numeric" maxlength="6" autocomplete="one-time-code"/>
+          <button class="w-full bg-primary text-on-primary py-4 mt-6 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="verifyBtn">Verify &amp; Create Account</button>
+          <div class="flex items-center justify-between mt-5 text-sm">
+            <span class="text-on-surface-variant">Didn't receive it?</span>
+            <button class="text-primary hover:underline disabled:opacity-50 disabled:no-underline font-label text-label-sm" id="resendBtn" disabled>Resend in 30s</button>
+          </div>
+          <p class="text-center text-xs text-on-surface-variant mt-5">Code expires in 10 minutes</p>
+        </div>`;
+      startResendCountdown(30);
+
+      document.getElementById('backToRegBtn').addEventListener('click', () => { authMode = 'register'; renderAuth(); });
+      document.getElementById('resendBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('resendBtn');
+        btn.disabled = true; btn.textContent = 'Sending...';
+        try {
+          await Api.sendPin({ email: pendingRegistration.email });
+          toast('A new code was sent');
+          startResendCountdown(30);
+        } catch (e) {
+          toast(e.message || 'Could not resend code');
+          btn.disabled = false; btn.textContent = 'Resend code';
+        }
+      });
+      const verifyBtn = document.getElementById('verifyBtn');
+      const pinInput = document.getElementById('aPin');
+      pinInput.addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); });
+      const handleVerify = async () => {
+        const pin = pinInput.value;
+        if (!/^\d{6}$/.test(pin)) { toast('Enter the 6-digit code'); return; }
+        verifyBtn.disabled = true;
+        const orig = verifyBtn.textContent;
+        verifyBtn.textContent = 'Verifying...';
+        try {
+          const result = await Api.register({ ...pendingRegistration, pin });
+          token = result.token; currentUser = result.user;
+          Store.set('token', token); Store.set('user', currentUser);
+          pendingRegistration = null;
+          clearInterval(resendTimer);
+          toast('Welcome to Flora, ' + currentUser.name);
+          setTimeout(() => location.href = 'index.html', 600);
+        } catch (e) {
+          verifyBtn.disabled = false; verifyBtn.textContent = orig;
+          toast(e.message || 'Verification failed');
+          pinInput.focus(); pinInput.select();
+        }
+      };
+      verifyBtn.addEventListener('click', handleVerify);
+      pinInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') handleVerify(); });
+      setTimeout(() => pinInput.focus(), 100);
+      applyReveal();
+      return;
+    }
+
     el.innerHTML = `
       <div class="max-w-md mx-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-8 md:p-10 reveal">
         <h2 class="font-display text-headline-md text-primary text-center mb-2">${authMode === 'login' ? 'Welcome Back' : 'Join Flora'}</h2>
@@ -876,10 +966,11 @@
           <button class="flex-1 py-2 rounded-md font-label text-label-sm transition ${authMode === 'login' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant'}" data-mode="login">Login</button>
           <button class="flex-1 py-2 rounded-md font-label text-label-sm transition ${authMode === 'register' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant'}" data-mode="register">Register</button>
         </div>
-        ${authMode === 'register' ? `<div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Full Name</label><input class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="aName" placeholder="Your name"/></div>` : ''}
+        ${authMode === 'register' ? `<div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Full Name</label><input class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="aName" placeholder="Your name" autocomplete="name"/></div>` : ''}
         <div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Email</label><input type="email" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="aEmail" placeholder="email@example.com" autocomplete="email"/></div>
         <div class="mb-6"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Password</label><input type="password" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="aPass" placeholder="${authMode === 'register' ? 'Min. 6 characters' : 'Enter password'}" autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}"/></div>
-        <button class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="authSubmit">${authMode === 'login' ? 'Sign In' : 'Create Account'}</button>
+        <button class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="authSubmit">${authMode === 'login' ? 'Sign In' : 'Send Verification Code'}</button>
+        ${authMode === 'register' ? `<p class="text-center text-xs text-on-surface-variant mt-4">We'll email you a 6-digit code to verify your address.</p>` : ''}
         <p class="text-center text-xs text-on-surface-variant mt-5">Demo admin: admin@flora.com / admin123</p>
       </div>`;
     el.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => { authMode = b.dataset.mode; renderAuth(); }));
@@ -887,27 +978,34 @@
     const handle = async () => {
       const email = document.getElementById('aEmail').value.trim();
       const pass  = document.getElementById('aPass').value;
-      submit.disabled = true; const orig = submit.textContent; submit.textContent = 'Please wait...';
+      if (!email || !pass) { toast('Please fill all fields'); return; }
+      submit.disabled = true; const orig = submit.textContent;
+      submit.textContent = authMode === 'login' ? 'Signing in...' : 'Sending code...';
       try {
-        let result;
         if (authMode === 'login') {
-          result = await Api.login({ email, password: pass });
+          const result = await Api.login({ email, password: pass });
+          token = result.token; currentUser = result.user;
+          Store.set('token', token); Store.set('user', currentUser);
+          toast('Welcome back, ' + currentUser.name);
+          setTimeout(() => location.href = currentUser.role === 'admin' ? 'admin.html' : 'index.html', 600);
         } else {
           const name = document.getElementById('aName').value.trim();
           if (!name) { submit.disabled = false; submit.textContent = orig; toast('Please enter your name'); return; }
-          result = await Api.register({ name, email, password: pass });
+          if (pass.length < 6) { submit.disabled = false; submit.textContent = orig; toast('Password must be at least 6 characters'); return; }
+          await Api.sendPin({ email });
+          pendingRegistration = { name, email, password: pass };
+          authMode = 'verify';
+          renderAuth();
+          toast('Verification code sent — check your inbox');
         }
-        token = result.token; currentUser = result.user;
-        Store.set('token', token); Store.set('user', currentUser);
-        toast((authMode === 'login' ? 'Welcome back, ' : 'Welcome to Flora, ') + currentUser.name);
-        setTimeout(() => location.href = currentUser.role === 'admin' ? 'admin.html' : 'index.html', 600);
       } catch (e) {
         submit.disabled = false; submit.textContent = orig;
         toast(e.message || 'Authentication failed');
       }
     };
     submit.addEventListener('click', handle);
-    [document.getElementById('aEmail'), document.getElementById('aPass'), document.getElementById('aName')].forEach(i => {
+    ['aEmail', 'aPass', 'aName'].forEach(id => {
+      const i = document.getElementById(id);
       if (i) i.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') handle(); });
     });
     applyReveal();
@@ -1060,83 +1158,4 @@
         el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Client','Service','Date','Guests','Notes','Status'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${resv.length ? resv.map(r => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${r.id}</td><td class="px-4 py-3">${r.name}<br/><span class="text-[10px] text-on-surface-variant">${r.email || ''}</span></td><td class="px-4 py-3">${r.service}</td><td class="px-4 py-3">${r.date}</td><td class="px-4 py-3">${r.guests || '—'}</td><td class="px-4 py-3 text-xs text-on-surface-variant max-w-[160px]">${r.notes || ''}</td><td class="px-4 py-3"><select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-resv="${r.rawId}">${['pending','confirmed','cancelled'].map(s => `<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select></td></tr>`).join('') : '<tr><td colspan="7" class="text-center px-4 py-12 text-on-surface-variant">No reservations yet.</td></tr>'}</tbody></table></div>`;
         el.querySelectorAll('[data-resv]').forEach(s => s.addEventListener('change', async () => {
           try { await Api.adminUpdateReservation(s.dataset.resv, s.value); toast('Reservation updated'); }
-          catch (e) { toast(e.message || 'Update failed'); }
-        }));
-      } else if (adminSection === 'ausers') {
-        const users = await Api.adminUsers();
-        adminCache.users = users;
-        el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Role','Orders','Joined'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${users.map(u => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${u.id}</td><td class="px-4 py-3">${u.name}</td><td class="px-4 py-3">${u.email}</td><td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-[10px] uppercase tracking-widest ${u.role==='admin'?'bg-secondary-fixed text-on-secondary-container':'bg-primary-fixed text-primary'}">${u.role}</span></td><td class="px-4 py-3">${u.order_count}</td><td class="px-4 py-3 text-xs text-on-surface-variant">${u.created_at ? new Date(u.created_at).toLocaleDateString('tr-TR') : ''}</td></tr>`).join('')}</tbody></table></div>`;
-      }
-    } catch (e) {
-      // If session was invalidated mid-render, send them to login.
-      if (e.status === 401 || e.status === 403) {
-        el.innerHTML = `
-          <div class="text-center py-16 text-on-surface-variant">
-            <span class="material-symbols-outlined text-5xl text-primary/40 mb-3 block">lock</span>
-            <p class="mb-2">${e.status === 401 ? 'Your session has expired.' : 'Admin access required.'}</p>
-            <p class="text-sm mb-6">Please log in again to continue.</p>
-            <a class="bg-primary text-on-primary px-6 py-3 rounded-full text-sm uppercase tracking-widest" href="auth.html">Sign in</a>
-          </div>`;
-        // Re-render nav so it shows logged-out state
-        injectLayout();
-        bindLogoutButtons();
-        return;
-      }
-      el.innerHTML = errorHTML(e.message || 'Could not load admin data.');
-    }
-  }
-
-  function initAdmin() {
-    document.querySelectorAll('.admin-tab').forEach(b => b.addEventListener('click', () => {
-      adminSection = b.dataset.section; renderAdmin();
-    }));
-    renderAdmin();
-  }
-
-  // ─── BOOT ─────────────────────────────────────────────────────
-  function injectLayout() {
-    const page = document.body.dataset.page || 'home';
-    const headEl = document.getElementById('site-nav');
-    const footEl = document.getElementById('site-footer');
-    const ambEl  = document.getElementById('site-ambient');
-    if (headEl) headEl.outerHTML = navHTML(page);
-    if (footEl) footEl.outerHTML = footerHTML();
-    if (ambEl)  ambEl.outerHTML  = ambientHTML();
-  }
-
-  async function refreshSession() {
-    if (!token) {
-      // No token means logged out, regardless of cached user.
-      if (currentUser) { currentUser = null; Store.clear('user'); }
-      return;
-    }
-    try {
-      const { user } = await Api.me();
-      currentUser = user;
-      Store.set('user', currentUser);
-    } catch (e) {
-      // api() helper already cleared token + user on 401; continue as guest.
-    }
-  }
-
-  async function boot() {
-    await refreshSession();
-    injectLayout();
-    setupDrawer();
-    bindLogoutButtons();
-    updateCartBadge();
-    const page = document.body.dataset.page;
-    const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin }[page];
-    if (init) { try { await init(); } catch (e) { console.error(e); toast(e.message || 'Page error'); } }
-    bindLogoutButtons();
-    applyReveal();
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
-
-  window.Flora = { addToCart, fmt, toast, api };
-})();
+          catch (e) { toast(e.message || '

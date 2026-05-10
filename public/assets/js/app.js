@@ -24,7 +24,13 @@
   let currentUser = Store.get('user', null);
   let products = [];
   let productsLoaded = false;
-  let dataLoadFailed = false;
+
+  // Normalize state on load: a cached user without a token is meaningless.
+  // Always start logged-out unless we have a token to validate against the server.
+  if (!token && currentUser) {
+    currentUser = null;
+    Store.clear('user');
+  }
 
   // ─── API CLIENT ───────────────────────────────────────────────
   async function api(path, opts = {}) {
@@ -40,9 +46,11 @@
       const err = new Error((data && data.error) || res.statusText || 'Request failed');
       err.status = res.status;
       err.data = data;
-      if (res.status === 401 && token) {
-        token = null; currentUser = null;
-        Store.clear('token'); Store.clear('user');
+      if (res.status === 401) {
+        // Always clear stale auth on any 401, even if no token was sent.
+        // This prevents the nav showing "logged in" state while the API rejects everything.
+        if (token) { token = null; Store.clear('token'); }
+        if (currentUser) { currentUser = null; Store.clear('user'); }
       }
       throw err;
     }
@@ -78,6 +86,11 @@
     const authLabel = currentUser ? 'My Orders' : 'Login';
     const authHref  = currentUser ? 'orders.html' : 'auth.html';
     const authActive = (currentUser && activePage==='orders') || (!currentUser && activePage==='auth');
+    const logoutItem = currentUser
+      ? `<button class="nav-link font-label text-label-sm text-on-surface-variant hover:text-error transition flex items-center gap-1" id="navLogoutBtn" title="Logout from ${currentUser.email}">
+           <span class="material-symbols-outlined text-[18px]">logout</span>
+           <span>Logout</span>
+         </button>` : '';
 
     return `
     <div class="bg-primary text-on-primary py-2 text-center">
@@ -91,6 +104,7 @@
           <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${activePage==='events'?'is-active':''}" href="events.html">Events</a>
           <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${authActive?'is-active':''}" href="${authHref}">${authLabel}</a>
           ${adminItem}
+          ${logoutItem}
           <a class="relative" href="cart.html" aria-label="Cart">
             <span class="material-symbols-outlined text-primary text-[28px]">shopping_bag</span>
             <span class="absolute -top-2 -right-2 bg-primary text-on-primary text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold" data-cart-badge>0</span>
@@ -215,21 +229,40 @@
     const close   = document.getElementById('navCloseBtn');
     const drawer  = document.getElementById('drawer');
     const overlay = document.getElementById('drawerOverlay');
-    const logout  = document.getElementById('logoutDrawerBtn');
     if (!drawer || !overlay) return;
     const openD = () => { drawer.classList.add('open'); overlay.classList.add('open'); document.body.classList.add('menu-open'); };
     const closeD = () => { drawer.classList.remove('open'); overlay.classList.remove('open'); document.body.classList.remove('menu-open'); };
     if (open) open.addEventListener('click', openD);
     if (close) close.addEventListener('click', closeD);
     overlay.addEventListener('click', closeD);
-    if (logout) logout.addEventListener('click', () => doLogout());
+  }
+
+  function bindLogoutButtons() {
+    document.querySelectorAll('[data-logout]').forEach(btn => {
+      if (btn._floraBound) return;
+      btn._floraBound = true;
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        doLogout();
+      });
+    });
+    // Also wire up the legacy id-based buttons
+    ['navLogoutBtn', 'logoutDrawerBtn', 'logoutBtn', 'adminLogoutBtn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && !el._floraBound) {
+        el._floraBound = true;
+        el.addEventListener('click', (e) => { e.preventDefault(); doLogout(); });
+      }
+    });
   }
 
   function doLogout() {
-    token = null; currentUser = null;
-    Store.clear('token'); Store.clear('user');
-    toast('Logged out');
-    setTimeout(() => location.href = 'index.html', 400);
+    token = null;
+    currentUser = null;
+    Store.clear('token');
+    Store.clear('user');
+    toast('Logged out — see you again soon');
+    setTimeout(() => { location.href = 'index.html'; }, 500);
   }
 
   function updateCartBadge() {
@@ -1035,6 +1068,20 @@
         el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Role','Orders','Joined'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${users.map(u => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${u.id}</td><td class="px-4 py-3">${u.name}</td><td class="px-4 py-3">${u.email}</td><td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-[10px] uppercase tracking-widest ${u.role==='admin'?'bg-secondary-fixed text-on-secondary-container':'bg-primary-fixed text-primary'}">${u.role}</span></td><td class="px-4 py-3">${u.order_count}</td><td class="px-4 py-3 text-xs text-on-surface-variant">${u.created_at ? new Date(u.created_at).toLocaleDateString('tr-TR') : ''}</td></tr>`).join('')}</tbody></table></div>`;
       }
     } catch (e) {
+      // If session was invalidated mid-render, send them to login.
+      if (e.status === 401 || e.status === 403) {
+        el.innerHTML = `
+          <div class="text-center py-16 text-on-surface-variant">
+            <span class="material-symbols-outlined text-5xl text-primary/40 mb-3 block">lock</span>
+            <p class="mb-2">${e.status === 401 ? 'Your session has expired.' : 'Admin access required.'}</p>
+            <p class="text-sm mb-6">Please log in again to continue.</p>
+            <a class="bg-primary text-on-primary px-6 py-3 rounded-full text-sm uppercase tracking-widest" href="auth.html">Sign in</a>
+          </div>`;
+        // Re-render nav so it shows logged-out state
+        injectLayout();
+        bindLogoutButtons();
+        return;
+      }
       el.innerHTML = errorHTML(e.message || 'Could not load admin data.');
     }
   }
@@ -1058,13 +1105,17 @@
   }
 
   async function refreshSession() {
-    if (!token) return;
+    if (!token) {
+      // No token means logged out, regardless of cached user.
+      if (currentUser) { currentUser = null; Store.clear('user'); }
+      return;
+    }
     try {
       const { user } = await Api.me();
       currentUser = user;
       Store.set('user', currentUser);
     } catch (e) {
-      // 401 already cleared token; just continue as guest
+      // api() helper already cleared token + user on 401; continue as guest.
     }
   }
 
@@ -1072,10 +1123,12 @@
     await refreshSession();
     injectLayout();
     setupDrawer();
+    bindLogoutButtons();
     updateCartBadge();
     const page = document.body.dataset.page;
     const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin }[page];
     if (init) { try { await init(); } catch (e) { console.error(e); toast(e.message || 'Page error'); } }
+    bindLogoutButtons();
     applyReveal();
   }
 

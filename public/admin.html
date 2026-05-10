@@ -21,7 +21,7 @@
     <h1 class="font-display text-headline-lg-mobile md:text-headline-lg text-primary">Admin Dashboard</h1>
   </div>
   <div class="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6 md:gap-8">
-    <aside class="bg-tertiary text-tertiary-fixed-dim rounded-xl p-3 lg:sticky lg:top-32 self-start reveal">
+    <aside class="bg-tertiary text-tertiary-fixed-dim rounded-xl p-3 lg:sticky lg:top-32 self-start reveal flex flex-col">
       <nav class="flex flex-row lg:flex-col gap-1 overflow-x-auto">
         <button class="admin-tab flex items-center gap-3 px-4 py-3 rounded-lg text-left whitespace-nowrap hover:bg-white/10 transition" data-section="dashboard">
           <span class="material-symbols-outlined text-[20px]">dashboard</span><span class="font-label text-label-sm">Dashboard</span>
@@ -39,6 +39,12 @@
           <span class="material-symbols-outlined text-[20px]">group</span><span class="font-label text-label-sm">Users</span>
         </button>
       </nav>
+      <div class="hidden lg:block mt-3 pt-3 border-t border-white/10">
+        <button class="flex items-center gap-3 w-full px-4 py-3 rounded-lg text-left text-tertiary-fixed-dim hover:bg-error/20 hover:text-error transition" id="adminLogoutBtn">
+          <span class="material-symbols-outlined text-[20px]">logout</span>
+          <span class="font-label text-label-sm">Logout</span>
+        </button>
+      </div>
     </aside>
     <section id="adminContent" class="reveal min-h-[400px]"></section>
   </div>

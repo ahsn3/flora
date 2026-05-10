@@ -1,0 +1,64 @@
+html { scroll-behavior: smooth; }
+body { font-family: 'Source Sans 3', sans-serif; -webkit-font-smoothing: antialiased; }
+.font-display, .font-headline { font-family: 'Playfair Display', serif; }
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+/* Page enter animation */
+main { animation: pageFade .45s ease both; }
+@keyframes pageFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Reveal-on-scroll */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .6s ease; }
+.reveal.show { opacity: 1; transform: translateY(0); }
+
+/* Botanical divider */
+.botanical-divider { height: 1px; background: linear-gradient(90deg, transparent, #dac0c3, transparent); width: 100%; }
+
+/* Floating ambient blooms */
+.ambient-bloom { position: fixed; pointer-events: none; opacity: .06; z-index: 0; }
+.ambient-bloom.b1 { top: 8%; left: -40px; font-size: 240px; color: #621428; animation: floatA 14s ease-in-out infinite; }
+.ambient-bloom.b2 { bottom: 6%; right: -50px; font-size: 220px; color: #775a19; animation: floatB 16s ease-in-out infinite; }
+@keyframes floatA { 0%,100%{transform:translateY(0) rotate(0)} 50%{transform:translateY(-22px) rotate(6deg)} }
+@keyframes floatB { 0%,100%{transform:translateY(0) rotate(0)} 50%{transform:translateY(20px) rotate(-6deg)} }
+
+/* Mobile drawer */
+.drawer { transform: translateX(100%); transition: transform .35s ease; }
+.drawer.open { transform: translateX(0); }
+.drawer-overlay { opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+.drawer-overlay.open { opacity: 1; pointer-events: auto; }
+body.menu-open { overflow: hidden; }
+
+/* Product card shine */
+.product-card { position: relative; overflow: hidden; }
+.product-card::before {
+  content: ''; position: absolute; top: -120%; left: -60%;
+  width: 42%; height: 260%;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,.5), transparent);
+  transform: rotate(18deg); opacity: 0; pointer-events: none;
+}
+.product-card:hover::before { animation: shine 1s ease; }
+@keyframes shine { 0%{left:-60%;opacity:0} 16%{opacity:1} 100%{left:130%;opacity:0} }
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 28px; left: 50%;
+  transform: translate(-50%, 120%);
+  background: #1e1b18; color: #fff8f5;
+  padding: 14px 22px; border-radius: 12px;
+  font-size: 14px; z-index: 9999;
+  transition: transform .35s ease, opacity .35s ease;
+  opacity: 0; box-shadow: 0 16px 36px rgba(98,20,40,.18);
+}
+.toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+/* Nav active state */
+.nav-link.is-active, .drawer-link.is-active { color: #621428; font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; }
+  main { animation: none; }
+}

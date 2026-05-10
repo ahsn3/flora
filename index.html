@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Flora &amp; Gifts | Artisanal Botanical Poetry</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="assets/css/styles.css" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script src="assets/js/tailwind-config.js"></script>
+</head>
+<body class="bg-background text-on-background selection:bg-primary-fixed selection:text-primary" data-page="home">
+
+<div id="site-ambient"></div>
+<div id="site-nav"></div>
+
+<main class="relative z-10">
+
+  <!-- Hero -->
+  <section class="px-margin-mobile md:px-margin-desktop pt-6 max-w-container-max mx-auto">
+    <div class="relative overflow-hidden rounded-[2rem] aspect-[16/10] md:aspect-[21/9] flex items-center bg-primary">
+      <div class="absolute inset-0 z-0">
+        <img class="w-full h-full object-cover opacity-70 mix-blend-overlay" alt="Lush peonies and roses" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAjKytaVgRyRduHtBR4AX3HFH45R_T6g2GrnkGNuDKz96nldYF3JrmoKZmPSbai06hDeOqVKFcHEVkhSPSB213Dg1KXCHc5ZZXQb1AAKdOQlahxI_TMR3YFgssfVcKb0lL3uKIqDgI3K9usKilKWbKIBrc1f26ccvq_feNWMS2XY_hkQXWjKGWriZUxhD8hvnMrA4HHWTw18TrTqBcYD4JYGQtHoKa33DnMtIqrOh5ihPKjnza36ihJ5k0Y9HoF8yrY10uq9V9_JMI"/>
+        <div class="absolute inset-0 bg-gradient-to-r from-primary/85 via-primary/50 to-transparent"></div>
+      </div>
+      <div class="relative z-10 px-7 md:px-20 max-w-2xl">
+        <span class="font-label text-label-sm uppercase tracking-[0.3em] text-secondary-fixed mb-4 block reveal">Artisanal Botanical Poetry</span>
+        <h1 class="font-display text-headline-lg-mobile md:text-headline-lg lg:text-display-lg text-surface-bright leading-tight mb-6 reveal">
+          Where Every Bloom <br/><span class="italic text-secondary-fixed">Tells a Story</span>
+        </h1>
+        <p class="font-body text-body-md md:text-body-lg text-surface-container-high mb-8 max-w-lg opacity-90 reveal">Premium flowers, curated gifts, and bespoke event arrangements — delivered with love and artisanal care.</p>
+        <div class="flex flex-wrap gap-3 md:gap-4 reveal">
+          <a class="bg-surface-bright text-primary px-7 md:px-8 py-4 rounded-full font-label text-label-sm hover:bg-secondary-fixed transition shadow-lg" href="shop.html">Shop Collection</a>
+          <a class="border border-surface-bright/40 text-surface-bright px-7 md:px-8 py-4 rounded-full font-label text-label-sm hover:bg-white/10 transition" href="events.html">Book an Event</a>
+        </div>
+      </div>
+      <div class="absolute right-[-5%] top-[-10%] opacity-10 pointer-events-none hidden md:block">
+        <span class="material-symbols-outlined text-[400px] text-surface-bright">local_florist</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Featured products -->
+  <section class="px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto py-20 md:py-28">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 md:mb-16 gap-6">
+      <div class="reveal">
+        <span class="font-label text-label-sm text-secondary tracking-widest uppercase mb-3 block">Handpicked for You</span>
+        <h2 class="font-display text-headline-md md:text-headline-lg text-on-background">Featured Collection</h2>
+      </div>
+      <a class="font-label text-label-sm text-primary border-b border-primary/30 pb-1 hover:text-secondary hover:border-secondary transition reveal" href="shop.html">View All Flowers →</a>
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-gutter" id="featuredGrid"></div>
+  </section>
+
+  <!-- Features bento -->
+  <section class="bg-surface-container-low py-20 md:py-section-gap">
+    <div class="px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-12">
+        <div class="text-center group reveal">
+          <div class="mb-6 md:mb-8 inline-flex items-center justify-center w-20 h-20 rounded-full bg-white text-primary group-hover:bg-primary group-hover:text-white transition-all duration-500 shadow-sm">
+            <span class="material-symbols-outlined text-[32px]">spa</span>
+          </div>
+          <h4 class="font-display text-headline-md mb-3 text-primary">Fresh Daily</h4>
+          <p class="font-body text-on-surface-variant max-w-xs mx-auto leading-relaxed">Every arrangement is crafted the same day using the freshest seasonal blooms from our partner farms.</p>
+        </div>
+        <div class="text-center group reveal">
+          <div class="mb-6 md:mb-8 inline-flex items-center justify-center w-20 h-20 rounded-full bg-white text-primary group-hover:bg-primary group-hover:text-white transition-all duration-500 shadow-sm">
+            <span class="material-symbols-outlined text-[32px]">card_giftcard</span>
+          </div>
+          <h4 class="font-display text-headline-md mb-3 text-primary">Gift Wrapping</h4>
+          <p class="font-body text-on-surface-variant max-w-xs mx-auto leading-relaxed">Premium packaging with personal message cards, silk ribbons, and bespoke wrapping options for every occasion.</p>
+        </div>
+        <div class="text-center group reveal">
+          <div class="mb-6 md:mb-8 inline-flex items-center justify-center w-20 h-20 rounded-full bg-white text-primary group-hover:bg-primary group-hover:text-white transition-all duration-500 shadow-sm">
+            <span class="material-symbols-outlined text-[32px]">event_seat</span>
+          </div>
+          <h4 class="font-display text-headline-md mb-3 text-primary">Event Design</h4>
+          <p class="font-body text-on-surface-variant max-w-xs mx-auto leading-relaxed">From intimate gatherings to grand weddings, our team creates breathtaking floral environments tailored to your vision.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Editorial quote -->
+  <section class="py-20 md:py-section-gap relative overflow-hidden">
+    <div class="max-w-3xl mx-auto text-center px-margin-mobile relative z-10 reveal">
+      <span class="material-symbols-outlined text-secondary text-5xl mb-6">format_quote</span>
+      <p class="font-display text-headline-md md:text-headline-lg text-primary mb-6 italic leading-tight">"Their work didn't just decorate the room; it gave it a soul. Every stem felt like it was placed with a specific memory in mind."</p>
+      <p class="font-label text-label-sm uppercase tracking-widest text-secondary">— Eleanor Vance, Private Estate Client</p>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+<script src="assets/js/app.js"></script>
+</body>
+</html>

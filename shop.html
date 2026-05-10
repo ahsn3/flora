@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Shop | Flora &amp; Gifts</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="assets/css/styles.css" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script src="assets/js/tailwind-config.js"></script>
+</head>
+<body class="bg-background text-on-background" data-page="shop">
+
+<div id="site-ambient"></div>
+<div id="site-nav"></div>
+
+<main class="px-margin-mobile md:px-margin-desktop py-12 md:py-20 max-w-container-max mx-auto">
+  <div class="text-center mb-10 md:mb-16 reveal">
+    <span class="font-label text-label-sm text-secondary tracking-widest uppercase mb-3 block">The Collection</span>
+    <h1 class="font-display text-headline-lg-mobile md:text-headline-lg text-primary mb-4">Shop Our Botanical Gallery</h1>
+    <p class="text-on-surface-variant max-w-xl mx-auto">Each bouquet, gift, and centerpiece is hand-crafted with the freshest blooms — chosen for their beauty and story.</p>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8 md:gap-12">
+    <aside class="lg:sticky lg:top-32 self-start space-y-6 reveal">
+      <div>
+        <label class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant block mb-3">Search</label>
+        <div class="relative">
+          <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">search</span>
+          <input class="w-full pl-10 pr-4 py-3 bg-surface-container-low border border-outline-variant/40 rounded-lg focus:outline-none focus:border-primary" id="searchInput" placeholder="Search blooms..."/>
+        </div>
+      </div>
+      <div>
+        <label class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant block mb-3">Category</label>
+        <ul class="space-y-1" id="filterBtns"></ul>
+      </div>
+    </aside>
+    <section>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-gutter" id="productsGrid"></div>
+    </section>
+  </div>
+</main>
+
+<div id="site-footer"></div>
+<script src="assets/js/app.js"></script>
+</body>
+</html>

@@ -5,6 +5,12 @@
  * (useful for local development). */
 
 const nodemailer = require('nodemailer');
+const dns = require('dns');
+
+// Many cloud platforms (Railway, Fly, some Docker setups) only have IPv4
+// egress, but Node will happily return an IPv6 address from DNS and then hang
+// with ENETUNREACH. Force IPv4-first resolution at the process level.
+try { dns.setDefaultResultOrder('ipv4first'); } catch (_) { /* older Node */ }
 
 const HOST   = process.env.SMTP_HOST;
 const PORT   = parseInt(process.env.SMTP_PORT || '587', 10);
@@ -24,6 +30,9 @@ if (HOST && USER && PASS) {
     port: PORT,
     secure: SECURE,
     auth: { user: USER, pass: cleanPass },
+    // Force IPv4 — Railway containers don't have IPv6 egress, so without this
+    // Node may resolve the SMTP host to AAAA and hang with ENETUNREACH.
+    family: 4,
     // Aggressive timeouts so a misconfigured SMTP server can't hang requests.
     connectionTimeout: 10_000,
     greetingTimeout: 8_000,

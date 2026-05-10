@@ -988,7 +988,6 @@
         <div class="mb-6"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Password</label><input type="password" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="aPass" placeholder="${authMode === 'register' ? 'Min. 6 characters' : 'Enter password'}" autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}"/></div>
         <button class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="authSubmit">${authMode === 'login' ? 'Sign In' : 'Send Verification Code'}</button>
         ${authMode === 'register' ? `<p class="text-center text-xs text-on-surface-variant mt-4">We'll email you a 6-digit code to verify your address.</p>` : ''}
-        <p class="text-center text-xs text-on-surface-variant mt-5">Demo admin: admin@flora.com / admin123</p>
       </div>`;
     el.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => { authMode = b.dataset.mode; renderAuth(); }));
     const submit = document.getElementById('authSubmit');

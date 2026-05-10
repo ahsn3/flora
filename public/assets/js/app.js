@@ -36,7 +36,24 @@
   async function api(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = 'Bearer ' + token;
-    const res = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    // Fail-fast: don't let a hung request lock up the UI.
+    const controller = new AbortController();
+    const timeoutMs = opts.timeoutMs || 20000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(path, {
+        ...opts,
+        headers,
+        signal: controller.signal,
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      if (e.name === 'AbortError') throw new Error('Request timed out — please check your connection.');
+      throw new Error('Network error: ' + (e.message || 'could not reach server'));
+    }
+    clearTimeout(timer);
     let data = null;
     const text = await res.text();
     if (text) {
@@ -1158,4 +1175,105 @@
         el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Client','Service','Date','Guests','Notes','Status'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${resv.length ? resv.map(r => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${r.id}</td><td class="px-4 py-3">${r.name}<br/><span class="text-[10px] text-on-surface-variant">${r.email || ''}</span></td><td class="px-4 py-3">${r.service}</td><td class="px-4 py-3">${r.date}</td><td class="px-4 py-3">${r.guests || '—'}</td><td class="px-4 py-3 text-xs text-on-surface-variant max-w-[160px]">${r.notes || ''}</td><td class="px-4 py-3"><select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-resv="${r.rawId}">${['pending','confirmed','cancelled'].map(s => `<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select></td></tr>`).join('') : '<tr><td colspan="7" class="text-center px-4 py-12 text-on-surface-variant">No reservations yet.</td></tr>'}</tbody></table></div>`;
         el.querySelectorAll('[data-resv]').forEach(s => s.addEventListener('change', async () => {
           try { await Api.adminUpdateReservation(s.dataset.resv, s.value); toast('Reservation updated'); }
-          catch (e) { toast(e.message || '
+          catch (e) { toast(e.message || 'Update failed'); }
+        }));
+      } else if (adminSection === 'ausers') {
+        const users = await Api.adminUsers();
+        adminCache.users = users;
+        el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Role','Orders','Joined'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${users.map(u => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${u.id}</td><td class="px-4 py-3">${u.name}</td><td class="px-4 py-3">${u.email}</td><td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-[10px] uppercase tracking-widest ${u.role==='admin'?'bg-secondary-fixed text-on-secondary-container':'bg-primary-fixed text-primary'}">${u.role}</span></td><td class="px-4 py-3">${u.order_count}</td><td class="px-4 py-3 text-xs text-on-surface-variant">${u.created_at ? new Date(u.created_at).toLocaleDateString('tr-TR') : ''}</td></tr>`).join('')}</tbody></table></div>`;
+      }
+    } catch (e) {
+      // If session was invalidated mid-render, send them to login.
+      if (e.status === 401 || e.status === 403) {
+        el.innerHTML = `
+          <div class="text-center py-16 text-on-surface-variant">
+            <span class="material-symbols-outlined text-5xl text-primary/40 mb-3 block">lock</span>
+            <p class="mb-2">${e.status === 401 ? 'Your session has expired.' : 'Admin access required.'}</p>
+            <p class="text-sm mb-6">Please log in again to continue.</p>
+            <a class="bg-primary text-on-primary px-6 py-3 rounded-full text-sm uppercase tracking-widest" href="auth.html">Sign in</a>
+          </div>`;
+        // Re-render nav so it shows logged-out state
+        injectLayout();
+        bindLogoutButtons();
+        return;
+      }
+      el.innerHTML = errorHTML(e.message || 'Could not load admin data.');
+    }
+  }
+
+  function initAdmin() {
+    document.querySelectorAll('.admin-tab').forEach(b => b.addEventListener('click', () => {
+      adminSection = b.dataset.section; renderAdmin();
+    }));
+    renderAdmin();
+  }
+
+  // ─── BOOT ─────────────────────────────────────────────────────
+  function injectLayout() {
+    const page = document.body.dataset.page || 'home';
+    const headEl = document.getElementById('site-nav');
+    const footEl = document.getElementById('site-footer');
+    const ambEl  = document.getElementById('site-ambient');
+    if (headEl) headEl.outerHTML = navHTML(page);
+    if (footEl) footEl.outerHTML = footerHTML();
+    if (ambEl)  ambEl.outerHTML  = ambientHTML();
+  }
+
+  async function refreshSession() {
+    if (!token) {
+      // No token means logged out, regardless of cached user.
+      if (currentUser) { currentUser = null; Store.clear('user'); }
+      return;
+    }
+    try {
+      const { user } = await Api.me();
+      currentUser = user;
+      Store.set('user', currentUser);
+    } catch (e) {
+      // api() helper already cleared token + user on 401; continue as guest.
+    }
+  }
+
+  async function boot() {
+    // 1. Render layout immediately with whatever cached state we have. This
+    //    guarantees the nav + footer appear instantly, even if the API is
+    //    slow or unreachable.
+    injectLayout();
+    setupDrawer();
+    bindLogoutButtons();
+    updateCartBadge();
+    applyReveal();
+
+    // 2. Refresh session in the background. If the cached user turns out to
+    //    be stale (token expired, etc.), re-inject the layout so the nav
+    //    reflects the corrected state.
+    const userBefore = currentUser ? currentUser.email : null;
+    refreshSession().then(() => {
+      const userAfter = currentUser ? currentUser.email : null;
+      if (userBefore !== userAfter) {
+        injectLayout();
+        setupDrawer();
+        bindLogoutButtons();
+        updateCartBadge();
+      }
+    }).catch(() => {});
+
+    // 3. Initialize the current page in parallel with the session refresh.
+    const page = document.body.dataset.page;
+    const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin }[page];
+    if (init) {
+      try { await init(); }
+      catch (e) { console.error(e); toast(e.message || 'Page error'); }
+    }
+    bindLogoutButtons();
+    applyReveal();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
+  window.Flora = { addToCart, fmt, toast, api };
+})();

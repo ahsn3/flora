@@ -219,10 +219,15 @@ app.post('/api/auth/send-pin', wrap(async (req, res) => {
     await sendPinEmail(lower, pin);
   } catch (err) {
     console.error('sendPinEmail failed:', err && err.message ? err.message : err);
-    const hint = /invalid login|auth|535|credentials/i.test(String(err && err.message))
-      ? 'Email credentials were rejected — check SMTP_USER/SMTP_PASS (use a Gmail App Password, not your regular password).'
-      : /timeout|timed out/i.test(String(err && err.message))
-      ? 'Email server did not respond. Check SMTP_HOST/SMTP_PORT and that outbound SMTP is allowed.'
+    const msg = String(err && err.message ? err.message : err);
+    const hint = /Resend API/i.test(msg)
+      ? msg.replace(/^Resend API \d+: /, 'Email error: ')
+      : /invalid login|auth|535|credentials/i.test(msg)
+      ? 'Email credentials were rejected — use a Gmail App Password, or switch to RESEND_API_KEY on Railway.'
+      : /ENETUNREACH|network unreachable/i.test(msg)
+      ? 'Gmail SMTP cannot reach the network from Railway. Add RESEND_API_KEY in Railway Variables (free at resend.com).'
+      : /timeout|timed out/i.test(msg)
+      ? 'Email server did not respond. On Railway, use RESEND_API_KEY instead of Gmail SMTP.'
       : 'Could not send verification email. Please try again shortly.';
     return res.status(502).json({ error: hint });
   }

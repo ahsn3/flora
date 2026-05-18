@@ -1,50 +1,66 @@
-/* Email sender — wraps nodemailer with a single SMTP transport.
- * Configure via env vars:
- *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE
- * If SMTP is not configured, falls back to logging the PIN to the console
- * (useful for local development). */
+/* Email sender for PIN verification.
+ *
+ * Railway blocks or breaks Gmail SMTP (IPv6 ENETUNREACH, port restrictions).
+ * Recommended for production: set RESEND_API_KEY (HTTPS, always works).
+ *
+ * Fallback: SMTP_* env vars with explicit IPv4 resolution.
+ * Dev: if neither is set, PINs are logged to the console.
+ */
 
 const nodemailer = require('nodemailer');
 const dns = require('dns');
 
-// Many cloud platforms (Railway, Fly, some Docker setups) only have IPv4
-// egress, but Node will happily return an IPv6 address from DNS and then hang
-// with ENETUNREACH. Force IPv4-first resolution at the process level.
-try { dns.setDefaultResultOrder('ipv4first'); } catch (_) { /* older Node */ }
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (_) {
+  /* older Node */
+}
 
-const HOST   = process.env.SMTP_HOST;
-const PORT   = parseInt(process.env.SMTP_PORT || '587', 10);
-const USER   = process.env.SMTP_USER;
-const PASS   = process.env.SMTP_PASS;
-const FROM   = process.env.SMTP_FROM || 'Flora & Gifts <no-reply@flora.local>';
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const RESEND_FROM = process.env.RESEND_FROM || 'Flora & Gifts <onboarding@resend.dev>';
+
+const HOST = process.env.SMTP_HOST;
+const PORT = parseInt(process.env.SMTP_PORT || '587', 10);
+const USER = process.env.SMTP_USER;
+const PASS = process.env.SMTP_PASS;
+const FROM = process.env.SMTP_FROM || 'Flora & Gifts <no-reply@flora.local>';
 const SECURE = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || PORT === 465;
 
-let transporter = null;
-let smtpEnabled = false;
+const useResend = Boolean(RESEND_API_KEY);
+const useSmtp = Boolean(HOST && USER && PASS);
+/** True when real emails can be sent (Resend or SMTP) */
+const emailEnabled = useResend || useSmtp;
+/** @deprecated use emailEnabled */
+const smtpEnabled = emailEnabled;
 
-if (HOST && USER && PASS) {
-  // Gmail App Passwords have spaces when copied — strip them.
+let transporter = null;
+let transportReady = null;
+
+async function createSmtpTransport() {
   const cleanPass = String(PASS).replace(/\s+/g, '');
-  transporter = nodemailer.createTransport({
-    host: HOST,
+  const { address } = await dns.promises.lookup(HOST, { family: 4 });
+  console.log(`SMTP using IPv4 ${address} for ${HOST}:${PORT}`);
+  return nodemailer.createTransport({
+    host: address,
     port: PORT,
     secure: SECURE,
     auth: { user: USER, pass: cleanPass },
-    // Force IPv4 — Railway containers don't have IPv6 egress, so without this
-    // Node may resolve the SMTP host to AAAA and hang with ENETUNREACH.
-    family: 4,
-    // Aggressive timeouts so a misconfigured SMTP server can't hang requests.
+    tls: { servername: HOST, minVersion: 'TLSv1.2' },
     connectionTimeout: 10_000,
     greetingTimeout: 8_000,
     socketTimeout: 15_000,
   });
-  smtpEnabled = true;
-  transporter.verify().then(
-    () => console.log(`✓ SMTP ready: ${HOST}:${PORT} as ${USER}`),
-    (err) => console.warn(`⚠️  SMTP transport verification failed: ${err.message}\n   Hint: for Gmail, ensure 2FA is on and you're using an App Password (not your regular password).`)
-  );
-} else {
-  console.warn('⚠️  SMTP not configured (set SMTP_HOST, SMTP_USER, SMTP_PASS). Falling back to console logging — verification PINs will be printed to the server logs.');
+}
+
+async function getTransporter() {
+  if (transporter) return transporter;
+  if (!transportReady) {
+    transportReady = createSmtpTransport().then((t) => {
+      transporter = t;
+      return t;
+    });
+  }
+  return transportReady;
 }
 
 function pinEmailHtml(pin, email) {
@@ -79,25 +95,77 @@ function pinEmailHtml(pin, email) {
 </html>`;
 }
 
-async function sendPinEmail(to, pin) {
-  if (!smtpEnabled) {
-    console.log(`\n  ✉  [DEV MODE] PIN for ${to}: ${pin}\n     (Configure SMTP env vars to send real emails)\n`);
-    return { dev: true, pin };
-  }
-  // Hard ceiling so a stuck SMTP server can't tie up an API request.
-  const sendPromise = transporter.sendMail({
-    from: FROM,
-    to,
-    subject: `Your Flora & Gifts verification code: ${pin}`,
-    text: `Welcome to Flora & Gifts.\n\nYour verification code is: ${pin}\n\nIt expires in 10 minutes. If you didn't request this, you can ignore this email.\n\n— Flora & Gifts`,
-    html: pinEmailHtml(pin, to),
-  });
-  const info = await Promise.race([
-    sendPromise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP send timed out after 15s')), 15_000)),
-  ]);
-  console.log(`✉  Sent PIN to ${to} (messageId: ${info.messageId})`);
-  return { sent: true, messageId: info.messageId };
+function pinEmailText(pin) {
+  return `Welcome to Flora & Gifts.\n\nYour verification code is: ${pin}\n\nIt expires in 10 minutes. If you didn't request this, you can ignore this email.\n\n— Flora & Gifts`;
 }
 
-module.exports = { sendPinEmail, smtpEnabled };
+async function sendViaResend(to, pin) {
+  const subject = `Your Flora & Gifts verification code: ${pin}`;
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM,
+      to: [to],
+      subject,
+      html: pinEmailHtml(pin, to),
+      text: pinEmailText(pin),
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = body.message || body.error || res.statusText;
+    throw new Error(`Resend API ${res.status}: ${detail}`);
+  }
+  console.log(`✉  Sent PIN to ${to} via Resend (id: ${body.id})`);
+  return { sent: true, provider: 'resend', messageId: body.id };
+}
+
+async function sendViaSmtp(to, pin) {
+  const t = await getTransporter();
+  const info = await Promise.race([
+    t.sendMail({
+      from: FROM,
+      to,
+      subject: `Your Flora & Gifts verification code: ${pin}`,
+      text: pinEmailText(pin),
+      html: pinEmailHtml(pin, to),
+    }),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('SMTP send timed out after 15s')), 15_000)
+    ),
+  ]);
+  console.log(`✉  Sent PIN to ${to} via SMTP (messageId: ${info.messageId})`);
+  return { sent: true, provider: 'smtp', messageId: info.messageId };
+}
+
+async function sendPinEmail(to, pin) {
+  if (useResend) return sendViaResend(to, pin);
+  if (useSmtp) return sendViaSmtp(to, pin);
+  console.log(`\n  ✉  [DEV MODE] PIN for ${to}: ${pin}\n     Set RESEND_API_KEY or SMTP_* in Railway to send real emails.\n`);
+  return { dev: true, pin };
+}
+
+if (useResend) {
+  console.log(`✓ Email via Resend API (from: ${RESEND_FROM})`);
+} else if (useSmtp) {
+  getTransporter()
+    .then((t) => t.verify())
+    .then(() => console.log(`✓ SMTP ready: ${HOST}:${PORT} as ${USER}`))
+    .catch((err) =>
+      console.warn(
+        `⚠️  SMTP verification failed: ${err.message}\n` +
+          '   On Railway, Gmail SMTP often fails — use RESEND_API_KEY instead (see .env.example).'
+      )
+    );
+} else {
+  console.warn(
+    '⚠️  No email provider configured. Set RESEND_API_KEY (recommended) or SMTP_* — PINs will print to logs only.'
+  );
+}
+
+module.exports = { sendPinEmail, smtpEnabled, emailEnabled };

@@ -12,7 +12,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
-const { sendPinEmail, smtpEnabled } = require('./db/mailer');
+const { sendPinEmail, smtpEnabled, getEmailProviderStatus } = require('./db/mailer');
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'flora-dev-secret-change-me-in-production';
@@ -168,7 +168,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 // ─── HEALTHCHECK ────────────────────────────────────────────────────
 app.get('/api/health', wrap(async (req, res) => {
   await pool.query('SELECT 1');
-  res.json({ ok: true, env: NODE_ENV });
+  res.json({ ok: true, env: NODE_ENV, email: getEmailProviderStatus() });
 }));
 
 // ─── AUTH ROUTES ────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ app.post('/api/auth/send-pin', wrap(async (req, res) => {
       : /ENETUNREACH|network unreachable/i.test(msg)
       ? 'Gmail SMTP cannot reach the network from Railway. Add RESEND_API_KEY in Railway Variables (free at resend.com).'
       : /timeout|timed out/i.test(msg)
-      ? 'Email server did not respond. On Railway, use RESEND_API_KEY instead of Gmail SMTP.'
+      ? `Email via ${getEmailProviderStatus().provider} timed out. For EmailJS, set all four EMAILJS_* vars and remove SMTP_* / RESEND_API_KEY from Railway.`
       : 'Could not send verification email. Please try again shortly.';
     return res.status(502).json({ error: hint });
   }

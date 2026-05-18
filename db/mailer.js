@@ -16,10 +16,18 @@ try {
   /* older Node */
 }
 
-const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID;
-const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID;
-const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY;
-const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
+function envTrim(...keys) {
+  for (const k of keys) {
+    const v = process.env[k];
+    if (v != null && String(v).trim()) return String(v).trim();
+  }
+  return '';
+}
+
+const EMAILJS_SERVICE_ID = envTrim('EMAILJS_SERVICE_ID');
+const EMAILJS_TEMPLATE_ID = envTrim('EMAILJS_TEMPLATE_ID', 'EMAILJS_TEMPLATE');
+const EMAILJS_PUBLIC_KEY = envTrim('EMAILJS_PUBLIC_KEY', 'EMAILJS_USER_ID', 'EMAILJS_PUBLIC_KEY_ID');
+const EMAILJS_PRIVATE_KEY = envTrim('EMAILJS_PRIVATE_KEY', 'EMAILJS_ACCESS_TOKEN');
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM = process.env.RESEND_FROM || 'Flora & Gifts <onboarding@resend.dev>';
@@ -31,7 +39,24 @@ const PASS = process.env.SMTP_PASS;
 const FROM = process.env.SMTP_FROM || 'Flora & Gifts <no-reply@flora.local>';
 const SECURE = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || PORT === 465;
 
-const useEmailjs = Boolean(EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID && EMAILJS_PUBLIC_KEY);
+const useEmailjs = Boolean(
+  EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID && EMAILJS_PUBLIC_KEY && EMAILJS_PRIVATE_KEY
+);
+
+function getEmailProviderStatus() {
+  if (useEmailjs) return { provider: 'emailjs', ready: true };
+  const missing = [];
+  if (!EMAILJS_SERVICE_ID) missing.push('EMAILJS_SERVICE_ID');
+  if (!EMAILJS_TEMPLATE_ID) missing.push('EMAILJS_TEMPLATE_ID');
+  if (!EMAILJS_PUBLIC_KEY) missing.push('EMAILJS_PUBLIC_KEY');
+  if (!EMAILJS_PRIVATE_KEY) missing.push('EMAILJS_PRIVATE_KEY');
+  if (EMAILJS_SERVICE_ID || EMAILJS_TEMPLATE_ID || EMAILJS_PUBLIC_KEY) {
+    return { provider: 'emailjs', ready: false, missing };
+  }
+  if (useResend) return { provider: 'resend', ready: true };
+  if (useSmtp) return { provider: 'smtp', ready: true };
+  return { provider: 'none', ready: false };
+}
 const useResend = Boolean(RESEND_API_KEY);
 const useSmtp = Boolean(HOST && USER && PASS);
 /** True when real emails can be sent */
@@ -212,9 +237,14 @@ if (useEmailjs) {
       )
     );
 } else {
-  console.warn(
-    '⚠️  No email provider configured. Set EMAILJS_* or RESEND_API_KEY — PINs will print to logs only.'
-  );
+  const st = getEmailProviderStatus();
+  if (st.missing?.length) {
+    console.warn(`⚠️  EmailJS incomplete — missing: ${st.missing.join(', ')}. Falling back to other providers.`);
+  } else {
+    console.warn(
+      '⚠️  No email provider configured. Set EMAILJS_* or RESEND_API_KEY — PINs will print to logs only.'
+    );
+  }
 }
 
-module.exports = { sendPinEmail, smtpEnabled, emailEnabled };
+module.exports = { sendPinEmail, smtpEnabled, emailEnabled, getEmailProviderStatus };

@@ -220,7 +220,9 @@ app.post('/api/auth/send-pin', wrap(async (req, res) => {
   } catch (err) {
     console.error('sendPinEmail failed:', err && err.message ? err.message : err);
     const msg = String(err && err.message ? err.message : err);
-    const hint = /only send testing emails to your own email/i.test(msg)
+    const hint = /EmailJS/i.test(msg)
+      ? `Could not send via EmailJS. Check EMAILJS_TEMPLATE_ID and that the template “To” field is {{to_email}}. (${msg.replace(/^EmailJS \d+: /, '')})`
+      : /only send testing emails to your own email/i.test(msg)
       ? 'With Resend’s free test sender, codes can only go to the Gmail on your Resend account. Sign up with that email, or verify your domain at resend.com/domains.'
       : /Resend API/i.test(msg)
       ? msg.replace(/^Resend API \d+: /, 'Email error: ')

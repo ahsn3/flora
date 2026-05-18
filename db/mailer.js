@@ -1,10 +1,10 @@
 /* Email sender for PIN verification.
  *
- * Railway blocks or breaks Gmail SMTP (IPv6 ENETUNREACH, port restrictions).
- * Recommended for production: set RESEND_API_KEY (HTTPS, always works).
- *
- * Fallback: SMTP_* env vars with explicit IPv4 resolution.
- * Dev: if neither is set, PINs are logged to the console.
+ * Providers (first match wins):
+ *   1. EmailJS — uses your connected Gmail (good for any recipient, 200/mo free)
+ *   2. Resend API — needs a verified domain to email anyone
+ *   3. SMTP — often broken on Railway
+ * Dev: if none configured, PINs print to the console.
  */
 
 const nodemailer = require('nodemailer');
@@ -16,6 +16,11 @@ try {
   /* older Node */
 }
 
+const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID;
+const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID;
+const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY;
+const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
+
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM = process.env.RESEND_FROM || 'Flora & Gifts <onboarding@resend.dev>';
 
@@ -26,10 +31,11 @@ const PASS = process.env.SMTP_PASS;
 const FROM = process.env.SMTP_FROM || 'Flora & Gifts <no-reply@flora.local>';
 const SECURE = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || PORT === 465;
 
+const useEmailjs = Boolean(EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID && EMAILJS_PUBLIC_KEY);
 const useResend = Boolean(RESEND_API_KEY);
 const useSmtp = Boolean(HOST && USER && PASS);
-/** True when real emails can be sent (Resend or SMTP) */
-const emailEnabled = useResend || useSmtp;
+/** True when real emails can be sent */
+const emailEnabled = useEmailjs || useResend || useSmtp;
 /** @deprecated use emailEnabled */
 const smtpEnabled = emailEnabled;
 
@@ -99,6 +105,43 @@ function pinEmailText(pin) {
   return `Welcome to Flora & Gifts.\n\nYour verification code is: ${pin}\n\nIt expires in 10 minutes. If you didn't request this, you can ignore this email.\n\n— Flora & Gifts`;
 }
 
+/** Server-side EmailJS — same Gmail service you use in the EmailJS dashboard. */
+async function sendViaEmailjs(to, pin) {
+  const payload = {
+    service_id: EMAILJS_SERVICE_ID,
+    template_id: EMAILJS_TEMPLATE_ID,
+    user_id: EMAILJS_PUBLIC_KEY,
+    template_params: {
+      to_email: to,
+      user_email: to,
+      pin,
+      passcode: pin,
+      message: pinEmailText(pin),
+    },
+  };
+  if (EMAILJS_PRIVATE_KEY) payload.accessToken = EMAILJS_PRIVATE_KEY;
+
+  const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const body = await res.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    parsed = { text: body };
+  }
+  if (!res.ok) {
+    const detail = parsed.text || parsed.message || parsed.error || body || res.statusText;
+    throw new Error(`EmailJS ${res.status}: ${detail}`);
+  }
+  console.log(`✉  Sent PIN to ${to} via EmailJS (service: ${EMAILJS_SERVICE_ID})`);
+  return { sent: true, provider: 'emailjs', messageId: parsed.id || 'ok' };
+}
+
 async function sendViaResend(to, pin) {
   const subject = `Your Flora & Gifts verification code: ${pin}`;
   const res = await fetch('https://api.resend.com/emails', {
@@ -144,13 +187,18 @@ async function sendViaSmtp(to, pin) {
 }
 
 async function sendPinEmail(to, pin) {
+  if (useEmailjs) return sendViaEmailjs(to, pin);
   if (useResend) return sendViaResend(to, pin);
   if (useSmtp) return sendViaSmtp(to, pin);
-  console.log(`\n  ✉  [DEV MODE] PIN for ${to}: ${pin}\n     Set RESEND_API_KEY or SMTP_* in Railway to send real emails.\n`);
+  console.log(
+    `\n  ✉  [DEV MODE] PIN for ${to}: ${pin}\n     Set EMAILJS_* or RESEND_API_KEY in Railway to send real emails.\n`
+  );
   return { dev: true, pin };
 }
 
-if (useResend) {
+if (useEmailjs) {
+  console.log(`✓ Email via EmailJS (service: ${EMAILJS_SERVICE_ID}, template: ${EMAILJS_TEMPLATE_ID})`);
+} else if (useResend) {
   console.log(`✓ Email via Resend API (from: ${RESEND_FROM})`);
 } else if (useSmtp) {
   getTransporter()
@@ -164,7 +212,7 @@ if (useResend) {
     );
 } else {
   console.warn(
-    '⚠️  No email provider configured. Set RESEND_API_KEY (recommended) or SMTP_* — PINs will print to logs only.'
+    '⚠️  No email provider configured. Set EMAILJS_* or RESEND_API_KEY — PINs will print to logs only.'
   );
 }
 

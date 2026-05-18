@@ -165,8 +165,21 @@ function requireAdmin(req, res, next) {
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+let dbReady = false;
+
 // ─── HEALTHCHECK ────────────────────────────────────────────────────
-app.get('/api/health', wrap(async (req, res) => {
+// Railway probes this before initDb() finishes — must respond 200 quickly.
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    env: NODE_ENV,
+    db: dbReady ? 'up' : 'connecting',
+    email: getEmailProviderStatus(),
+  });
+});
+
+app.get('/api/health/ready', wrap(async (req, res) => {
+  if (!dbReady) return res.status(503).json({ ok: false, db: 'connecting' });
   await pool.query('SELECT 1');
   res.json({ ok: true, env: NODE_ENV, email: getEmailProviderStatus() });
 }));
@@ -493,4 +506,87 @@ app.delete('/api/admin/users/:id', auth(true), requireAdmin, wrap(async (req, re
   }
 
   await pool.query('DELETE FROM email_pins WHERE email=$1', [email]);
-  await pool.query('DELETE FROM users WHERE id=$1
+  await pool.query('DELETE FROM users WHERE id=$1', [id]);
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/orders', auth(true), requireAdmin, wrap(async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT o.*, u.email AS user_email
+    FROM orders o
+    LEFT JOIN users u ON u.id = o.user_id
+    ORDER BY o.created_at DESC
+  `);
+  res.json(rows.map(r => rowToOrder(r, r.user_email)));
+}));
+
+app.patch('/api/admin/orders/:id', auth(true), requireAdmin, wrap(async (req, res) => {
+  const { status } = req.body || {};
+  if (!status) return res.status(400).json({ error: 'status required' });
+  await pool.query('UPDATE orders SET status=$1 WHERE id=$2', [status, req.params.id]);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/admin/orders/:id', auth(true), requireAdmin, wrap(async (req, res) => {
+  const r = await pool.query('DELETE FROM orders WHERE id=$1 RETURNING id', [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'Order not found' });
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/reservations', auth(true), requireAdmin, wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM reservations ORDER BY event_date ASC');
+  res.json(rows.map(r => ({
+    id: 'RES' + String(r.id).padStart(4, '0'),
+    rawId: r.id,
+    name: r.name,
+    email: r.email,
+    phone: r.phone,
+    service: r.service,
+    date: r.event_date ? new Date(r.event_date).toISOString().slice(0, 10) : '',
+    guests: r.guests,
+    status: r.status,
+    notes: r.notes,
+  })));
+}));
+
+app.patch('/api/admin/reservations/:id', auth(true), requireAdmin, wrap(async (req, res) => {
+  const { status } = req.body || {};
+  if (!status) return res.status(400).json({ error: 'status required' });
+  await pool.query('UPDATE reservations SET status=$1 WHERE id=$2', [status, req.params.id]);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/admin/reservations/:id', auth(true), requireAdmin, wrap(async (req, res) => {
+  const r = await pool.query('DELETE FROM reservations WHERE id=$1 RETURNING id', [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'Reservation not found' });
+  res.json({ ok: true });
+}));
+
+// ─── STATIC + SPA FALLBACK ──────────────────────────────────────────
+const PUBLIC_DIR = path.join(__dirname, 'public');
+app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  res.status(404).sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
+
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({ error: err.message || 'Server error' });
+});
+
+// ─── BOOT ───────────────────────────────────────────────────────────
+// Listen immediately so Railway healthchecks pass while Postgres/schema init runs.
+app.listen(PORT, () => {
+  console.log(`✿ Flora & Gifts listening on :${PORT} (${NODE_ENV})`);
+  initDb()
+    .then(() => {
+      dbReady = true;
+      console.log('✓ Database ready');
+    })
+    .catch(err => {
+      console.error('Database initialization failed:', err);
+      process.exit(1);
+    });
+});

@@ -220,7 +220,9 @@ app.post('/api/auth/send-pin', wrap(async (req, res) => {
   } catch (err) {
     console.error('sendPinEmail failed:', err && err.message ? err.message : err);
     const msg = String(err && err.message ? err.message : err);
-    const hint = /Resend API/i.test(msg)
+    const hint = /only send testing emails to your own email/i.test(msg)
+      ? 'With Resend’s free test sender, codes can only go to the Gmail on your Resend account. Sign up with that email, or verify your domain at resend.com/domains.'
+      : /Resend API/i.test(msg)
       ? msg.replace(/^Resend API \d+: /, 'Email error: ')
       : /invalid login|auth|535|credentials/i.test(msg)
       ? 'Email credentials were rejected — use a Gmail App Password, or switch to RESEND_API_KEY on Railway.'

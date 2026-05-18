@@ -112,6 +112,7 @@ async function sendViaEmailjs(to, pin) {
     template_id: EMAILJS_TEMPLATE_ID,
     user_id: EMAILJS_PUBLIC_KEY,
     template_params: {
+      email: to, // To field in template: {{email}}
       to_email: to,
       user_email: to,
       pin,

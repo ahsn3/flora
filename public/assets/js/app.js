@@ -89,10 +89,14 @@
     submitReservation: (body) => api('/api/reservations', { method: 'POST', body }),
     adminStats: () => api('/api/admin/stats'),
     adminUsers: () => api('/api/admin/users'),
+    adminUpdateUserRole: (id, role) => api('/api/admin/users/' + id, { method: 'PATCH', body: { role } }),
+    adminDeleteUser: (id) => api('/api/admin/users/' + id, { method: 'DELETE' }),
     adminOrders: () => api('/api/admin/orders'),
     adminUpdateOrder: (id, status) => api('/api/admin/orders/' + id, { method: 'PATCH', body: { status } }),
+    adminDeleteOrder: (id) => api('/api/admin/orders/' + id, { method: 'DELETE' }),
     adminReservations: () => api('/api/admin/reservations'),
     adminUpdateReservation: (id, status) => api('/api/admin/reservations/' + id, { method: 'PATCH', body: { status } }),
+    adminDeleteReservation: (id) => api('/api/admin/reservations/' + id, { method: 'DELETE' }),
   };
 
   // ─── LAYOUT TEMPLATES ─────────────────────────────────────────
@@ -1163,23 +1167,71 @@
       } else if (adminSection === 'aorders') {
         const orders = await Api.adminOrders();
         adminCache.orders = orders;
-        el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','User','Total','Date','Address','Payment','Status'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${orders.length ? orders.map(o => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${o.id}</td><td class="px-4 py-3">${o.user || '—'}</td><td class="px-4 py-3 text-secondary">${fmt(o.total)}</td><td class="px-4 py-3">${o.date}</td><td class="px-4 py-3 max-w-[160px] truncate">${o.address || ''}</td><td class="px-4 py-3">${o.payment || 'cash'}</td><td class="px-4 py-3"><select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-status="${o.rawId}">${['Processing','Shipped','Delivered','Cancelled'].map(s => `<option ${o.status===s?'selected':''}>${s}</option>`).join('')}</select></td></tr>`).join('') : '<tr><td colspan="7" class="text-center px-4 py-12 text-on-surface-variant">No orders yet.</td></tr>'}</tbody></table></div>`;
-        el.querySelectorAll('[data-status]').forEach(s => s.addEventListener('change', async () => {
-          try { await Api.adminUpdateOrder(s.dataset.status, s.value); toast('Order updated'); }
+        el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','User','Total','Date','Address','Payment','Status','Actions'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${orders.length ? orders.map(o => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${o.id}</td><td class="px-4 py-3">${o.user || '—'}</td><td class="px-4 py-3 text-secondary">${fmt(o.total)}</td><td class="px-4 py-3">${o.date}</td><td class="px-4 py-3 max-w-[160px] truncate">${o.address || ''}</td><td class="px-4 py-3">${o.payment || 'cash'}</td><td class="px-4 py-3"><select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-order-status="${o.rawId}">${['Processing','Shipped','Delivered','Cancelled'].map(s => `<option ${o.status===s?'selected':''}>${s}</option>`).join('')}</select></td><td class="px-4 py-3"><button type="button" class="text-error text-xs hover:underline" data-del-order="${o.rawId}">Delete</button></td></tr>`).join('') : '<tr><td colspan="8" class="text-center px-4 py-12 text-on-surface-variant">No orders yet.</td></tr>'}</tbody></table></div>`;
+        el.querySelectorAll('[data-order-status]').forEach(s => s.addEventListener('change', async () => {
+          try { await Api.adminUpdateOrder(s.dataset.orderStatus, s.value); toast('Order updated'); }
           catch (e) { toast(e.message || 'Update failed'); }
+        }));
+        el.querySelectorAll('[data-del-order]').forEach(b => b.addEventListener('click', async () => {
+          if (!confirm('Delete this order permanently?')) return;
+          try {
+            await Api.adminDeleteOrder(b.dataset.delOrder);
+            toast('Order deleted');
+            renderAdmin();
+          } catch (e) { toast(e.message || 'Could not delete order'); }
         }));
       } else if (adminSection === 'aresv') {
         const resv = await Api.adminReservations();
         adminCache.reservations = resv;
-        el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Client','Service','Date','Guests','Notes','Status'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${resv.length ? resv.map(r => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${r.id}</td><td class="px-4 py-3">${r.name}<br/><span class="text-[10px] text-on-surface-variant">${r.email || ''}</span></td><td class="px-4 py-3">${r.service}</td><td class="px-4 py-3">${r.date}</td><td class="px-4 py-3">${r.guests || '—'}</td><td class="px-4 py-3 text-xs text-on-surface-variant max-w-[160px]">${r.notes || ''}</td><td class="px-4 py-3"><select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-resv="${r.rawId}">${['pending','confirmed','cancelled'].map(s => `<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select></td></tr>`).join('') : '<tr><td colspan="7" class="text-center px-4 py-12 text-on-surface-variant">No reservations yet.</td></tr>'}</tbody></table></div>`;
+        el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Client','Service','Date','Guests','Notes','Status','Actions'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${resv.length ? resv.map(r => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${r.id}</td><td class="px-4 py-3">${r.name}<br/><span class="text-[10px] text-on-surface-variant">${r.email || ''}</span></td><td class="px-4 py-3">${r.service}</td><td class="px-4 py-3">${r.date}</td><td class="px-4 py-3">${r.guests || '—'}</td><td class="px-4 py-3 text-xs text-on-surface-variant max-w-[160px]">${r.notes || ''}</td><td class="px-4 py-3"><select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-resv="${r.rawId}">${['pending','confirmed','cancelled'].map(s => `<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select></td><td class="px-4 py-3"><button type="button" class="text-error text-xs hover:underline" data-del-resv="${r.rawId}">Delete</button></td></tr>`).join('') : '<tr><td colspan="8" class="text-center px-4 py-12 text-on-surface-variant">No reservations yet.</td></tr>'}</tbody></table></div>`;
         el.querySelectorAll('[data-resv]').forEach(s => s.addEventListener('change', async () => {
           try { await Api.adminUpdateReservation(s.dataset.resv, s.value); toast('Reservation updated'); }
           catch (e) { toast(e.message || 'Update failed'); }
         }));
+        el.querySelectorAll('[data-del-resv]').forEach(b => b.addEventListener('click', async () => {
+          if (!confirm('Delete this reservation permanently?')) return;
+          try {
+            await Api.adminDeleteReservation(b.dataset.delResv);
+            toast('Reservation deleted');
+            renderAdmin();
+          } catch (e) { toast(e.message || 'Could not delete reservation'); }
+        }));
       } else if (adminSection === 'ausers') {
         const users = await Api.adminUsers();
         adminCache.users = users;
-        el.innerHTML = `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Role','Orders','Joined'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${users.map(u => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${u.id}</td><td class="px-4 py-3">${u.name}</td><td class="px-4 py-3">${u.email}</td><td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-[10px] uppercase tracking-widest ${u.role==='admin'?'bg-secondary-fixed text-on-secondary-container':'bg-primary-fixed text-primary'}">${u.role}</span></td><td class="px-4 py-3">${u.order_count}</td><td class="px-4 py-3 text-xs text-on-surface-variant">${u.created_at ? new Date(u.created_at).toLocaleDateString('tr-TR') : ''}</td></tr>`).join('')}</tbody></table></div>`;
+        const myId = currentUser.id;
+        el.innerHTML = `<p class="text-sm text-on-surface-variant mb-4">Manage accounts, roles, and access. You cannot delete your own account or the primary admin.</p>
+          <div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Verified','Role','Orders','Joined','Actions'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${users.length ? users.map(u => {
+            const isSelf = u.id === myId;
+            const isPrimary = u.email === 'admin@flora.com';
+            const canDelete = !isSelf && !isPrimary;
+            const canChangeRole = !isPrimary && !isSelf;
+            const roleCell = canChangeRole
+              ? `<select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-user-role="${u.id}"><option value="user" ${u.role==='user'?'selected':''}>user</option><option value="admin" ${u.role==='admin'?'selected':''}>admin</option></select>`
+              : `<span class="px-2 py-1 rounded-full text-[10px] uppercase tracking-widest ${u.role==='admin'?'bg-secondary-fixed text-on-secondary-container':'bg-primary-fixed text-primary'}">${u.role}</span>`;
+            const verified = u.email_verified
+              ? '<span class="text-success text-xs">Yes</span>'
+              : '<span class="text-on-surface-variant text-xs">No</span>';
+            const actions = canDelete
+              ? `<button type="button" class="text-error text-xs hover:underline" data-del-user="${u.id}">Remove</button>`
+              : '<span class="text-on-surface-variant text-xs">—</span>';
+            return `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${u.id}</td><td class="px-4 py-3">${u.name}</td><td class="px-4 py-3">${u.email}</td><td class="px-4 py-3">${verified}</td><td class="px-4 py-3">${roleCell}</td><td class="px-4 py-3">${u.order_count}</td><td class="px-4 py-3 text-xs text-on-surface-variant">${u.created_at ? new Date(u.created_at).toLocaleDateString('tr-TR') : ''}</td><td class="px-4 py-3">${actions}</td></tr>`;
+          }).join('') : '<tr><td colspan="8" class="text-center px-4 py-12 text-on-surface-variant">No users yet.</td></tr>'}</tbody></table></div>`;
+        el.querySelectorAll('[data-user-role]').forEach(sel => sel.addEventListener('change', async () => {
+          try {
+            await Api.adminUpdateUserRole(sel.dataset.userRole, sel.value);
+            toast('Role updated');
+            renderAdmin();
+          } catch (e) { toast(e.message || 'Could not update role'); }
+        }));
+        el.querySelectorAll('[data-del-user]').forEach(b => b.addEventListener('click', async () => {
+          if (!confirm('Remove this user permanently? Their orders will stay but no longer be linked to an account.')) return;
+          try {
+            await Api.adminDeleteUser(b.dataset.delUser);
+            toast('User removed');
+            renderAdmin();
+          } catch (e) { toast(e.message || 'Could not remove user'); }
+        }));
       }
     } catch (e) {
       // If session was invalidated mid-render, send them to login.

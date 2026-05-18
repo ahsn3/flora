@@ -451,7 +451,7 @@ app.get('/api/admin/stats', auth(true), requireAdmin, wrap(async (req, res) => {
 
 app.get('/api/admin/users', auth(true), requireAdmin, wrap(async (req, res) => {
   const { rows } = await pool.query(`
-    SELECT u.id, u.name, u.email, u.role, u.created_at,
+    SELECT u.id, u.name, u.email, u.role, u.email_verified, u.created_at,
            COALESCE((SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id), 0)::int AS order_count
     FROM users u
     ORDER BY u.id ASC
@@ -459,64 +459,38 @@ app.get('/api/admin/users', auth(true), requireAdmin, wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.get('/api/admin/orders', auth(true), requireAdmin, wrap(async (req, res) => {
-  const { rows } = await pool.query(`
-    SELECT o.*, u.email AS user_email
-    FROM orders o
-    LEFT JOIN users u ON u.id = o.user_id
-    ORDER BY o.created_at DESC
-  `);
-  res.json(rows.map(r => rowToOrder(r, r.user_email)));
-}));
+app.patch('/api/admin/users/:id', auth(true), requireAdmin, wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { role } = req.body || {};
+  if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Role must be user or admin' });
 
-app.patch('/api/admin/orders/:id', auth(true), requireAdmin, wrap(async (req, res) => {
-  const { status } = req.body || {};
-  if (!status) return res.status(400).json({ error: 'status required' });
-  await pool.query('UPDATE orders SET status=$1 WHERE id=$2', [status, req.params.id]);
+  const target = await pool.query('SELECT id, role, email FROM users WHERE id=$1', [id]);
+  if (!target.rows.length) return res.status(404).json({ error: 'User not found' });
+
+  if (target.rows[0].role === 'admin' && role === 'user') {
+    const admins = await pool.query("SELECT COUNT(*)::int AS c FROM users WHERE role='admin'");
+    if (admins.rows[0].c <= 1) return res.status(400).json({ error: 'Cannot demote the only admin account' });
+  }
+
+  await pool.query('UPDATE users SET role=$1 WHERE id=$2', [role, id]);
   res.json({ ok: true });
 }));
 
-app.get('/api/admin/reservations', auth(true), requireAdmin, wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM reservations ORDER BY event_date ASC');
-  res.json(rows.map(r => ({
-    id: 'RES' + String(r.id).padStart(4, '0'),
-    rawId: r.id,
-    name: r.name,
-    email: r.email,
-    phone: r.phone,
-    service: r.service,
-    date: r.event_date ? new Date(r.event_date).toISOString().slice(0, 10) : '',
-    guests: r.guests,
-    status: r.status,
-    notes: r.notes,
-  })));
-}));
+app.delete('/api/admin/users/:id', auth(true), requireAdmin, wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (id === req.user.id) return res.status(400).json({ error: 'You cannot delete your own account' });
 
-app.patch('/api/admin/reservations/:id', auth(true), requireAdmin, wrap(async (req, res) => {
-  const { status } = req.body || {};
-  if (!status) return res.status(400).json({ error: 'status required' });
-  await pool.query('UPDATE reservations SET status=$1 WHERE id=$2', [status, req.params.id]);
-  res.json({ ok: true });
-}));
+  const target = await pool.query('SELECT id, email, role FROM users WHERE id=$1', [id]);
+  if (!target.rows.length) return res.status(404).json({ error: 'User not found' });
 
-// ─── STATIC + SPA FALLBACK ──────────────────────────────────────────
-const PUBLIC_DIR = path.join(__dirname, 'public');
-app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
+  const email = target.rows[0].email.toLowerCase();
+  if (email === 'admin@flora.com') {
+    return res.status(400).json({ error: 'Cannot delete the primary admin account' });
+  }
+  if (target.rows[0].role === 'admin') {
+    const admins = await pool.query("SELECT COUNT(*)::int AS c FROM users WHERE role='admin'");
+    if (admins.rows[0].c <= 1) return res.status(400).json({ error: 'Cannot delete the only admin account' });
+  }
 
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api/')) return next();
-  res.status(404).sendFile(path.join(PUBLIC_DIR, 'index.html'));
-});
-
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ error: err.message || 'Server error' });
-});
-
-// ─── BOOT ───────────────────────────────────────────────────────────
-initDb()
-  .then(() => app.listen(PORT, () => console.log(`✿ Flora & Gifts running on :${PORT} (${NODE_ENV})`)))
-  .catch(err => {
-    console.error('Database initialization failed:', err);
-    process.exit(1);
-  });
+  await pool.query('DELETE FROM email_pins WHERE email=$1', [email]);
+  await pool.query('DELETE FROM users WHERE id=$1

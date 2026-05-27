@@ -120,9 +120,17 @@ async function initDb() {
 
   const seedProducts = require('./db/seed-products.js');
   let productsAdded = 0;
+  let imagesUpdated = 0;
   for (const p of seedProducts) {
     const exists = await pool.query('SELECT id FROM products WHERE name=$1', [p.name]);
-    if (exists.rows.length) continue;
+    if (exists.rows.length) {
+      await pool.query(
+        `UPDATE products SET image=$1, gallery=$2 WHERE name=$3`,
+        [p.image || null, p.gallery ? JSON.stringify(p.gallery) : null, p.name]
+      );
+      imagesUpdated += 1;
+      continue;
+    }
     await pool.query(
       `INSERT INTO products (name, tagline, category, price, image, description, wrapping, card_available, stock, attributes, care, gallery)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
@@ -135,6 +143,7 @@ async function initDb() {
     productsAdded += 1;
   }
   if (productsAdded) console.log(`✓ Added ${productsAdded} new product(s) to catalog`);
+  if (imagesUpdated) console.log(`✓ Refreshed images for ${imagesUpdated} product(s)`);
 
   const resvCount = await pool.query('SELECT COUNT(*)::int AS c FROM reservations');
   if (resvCount.rows[0].c === 0) {

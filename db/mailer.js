@@ -26,6 +26,7 @@ function envTrim(...keys) {
 
 const EMAILJS_SERVICE_ID = envTrim('EMAILJS_SERVICE_ID');
 const EMAILJS_TEMPLATE_ID = envTrim('EMAILJS_TEMPLATE_ID', 'EMAILJS_TEMPLATE');
+const EMAILJS_RESET_TEMPLATE_ID = envTrim('EMAILJS_RESET_TEMPLATE_ID', 'EMAILJS_TEMPLATE_RESET');
 const EMAILJS_PUBLIC_KEY = envTrim('EMAILJS_PUBLIC_KEY', 'EMAILJS_USER_ID', 'EMAILJS_PUBLIC_KEY_ID');
 const EMAILJS_PRIVATE_KEY = envTrim('EMAILJS_PRIVATE_KEY', 'EMAILJS_ACCESS_TOKEN');
 
@@ -135,9 +136,13 @@ function pinEmailText(pin, purpose = 'signup') {
 
 /** Server-side EmailJS — same Gmail service you use in the EmailJS dashboard. */
 async function sendViaEmailjs(to, pin, purpose = 'signup') {
+  const templateId =
+    purpose === 'reset' && EMAILJS_RESET_TEMPLATE_ID
+      ? EMAILJS_RESET_TEMPLATE_ID
+      : EMAILJS_TEMPLATE_ID;
   const payload = {
     service_id: EMAILJS_SERVICE_ID,
-    template_id: EMAILJS_TEMPLATE_ID,
+    template_id: templateId,
     user_id: EMAILJS_PUBLIC_KEY,
     template_params: {
       email: to, // To field in template: {{email}}
@@ -145,6 +150,7 @@ async function sendViaEmailjs(to, pin, purpose = 'signup') {
       user_email: to,
       pin,
       passcode: pin,
+      purpose, // optional in template: signup | reset
       message: pinEmailText(pin, purpose),
     },
   };
@@ -232,7 +238,8 @@ async function sendPinEmail(to, pin, options = {}) {
 }
 
 if (useEmailjs) {
-  console.log(`✓ Email via EmailJS (service: ${EMAILJS_SERVICE_ID}, template: ${EMAILJS_TEMPLATE_ID})`);
+  const resetNote = EMAILJS_RESET_TEMPLATE_ID ? `, reset template: ${EMAILJS_RESET_TEMPLATE_ID}` : ' (signup + reset share signup template)';
+  console.log(`✓ Email via EmailJS (service: ${EMAILJS_SERVICE_ID}, template: ${EMAILJS_TEMPLATE_ID}${resetNote})`);
 } else if (useResend) {
   console.log(`✓ Email via Resend API (from: ${RESEND_FROM})`);
 } else if (useSmtp) {

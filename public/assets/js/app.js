@@ -13,6 +13,26 @@
   const COVER_COLORS = ['Burgundy', 'Blush Pink', 'Ivory Cream', 'Sage Green', 'Midnight Navy'];
   const FLOWER_COLORS = ['Classic Red', 'Soft Pink', 'Pure White', 'Lavender', 'Sunshine Yellow', 'Seasonal Mix'];
 
+  const STORE_INFO = {
+    name: 'Flora & Gifts Atelier',
+    address: 'Teşvikiye Cad. No: 42, Nişantaşı',
+    city: 'Şişli, Istanbul 34365',
+    country: 'Türkiye',
+    phone: '+90 (212) 555 0142',
+    phoneHref: 'tel:+902125550142',
+    email: 'hello@floragifts.com',
+    emailHref: 'mailto:hello@floragifts.com',
+    whatsapp: '+90 532 555 0142',
+    whatsappHref: 'https://wa.me/905325550142',
+    hours: [
+      { days: 'Monday – Friday', time: '9:00 – 19:00' },
+      { days: 'Saturday', time: '10:00 – 18:00' },
+      { days: 'Sunday', time: '11:00 – 16:00' },
+    ],
+    mapQuery: 'Nişantaşı, Istanbul, Turkey',
+    mapEmbed: 'https://www.google.com/maps?q=Ni%C5%9Fanta%C5%9F%C4%B1%2C+Istanbul&output=embed',
+  };
+
   // ─── PERSISTENCE (cart + token only) ──────────────────────────
   const KEY = 'flora.';
   const Store = {
@@ -106,19 +126,78 @@
   };
 
   // ─── LAYOUT TEMPLATES ─────────────────────────────────────────
+  function userInitials(name) {
+    return String(name || 'U').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'U';
+  }
+
+  function profileMenuLink(href, icon, label, opts = {}) {
+    const cls = opts.danger
+      ? 'flex items-center gap-3 px-4 py-3 text-sm text-error hover:bg-error/5 transition w-full text-left'
+      : 'flex items-center gap-3 px-4 py-3 text-sm text-on-surface hover:bg-surface-container-low transition';
+  if (opts.button) {
+      return `<button type="button" class="${cls}" ${opts.attrs || ''} role="menuitem">${icon}<span>${label}</span></button>`;
+    }
+    return `<a href="${href}" class="${cls}" role="menuitem">${icon}<span>${label}</span></a>`;
+  }
+
+  function profileNavDesktop(activePage) {
+    if (!currentUser) return '';
+    const initials = userInitials(currentUser.name);
+    const profileActive = activePage === 'profile' || activePage === 'orders';
+    const icon = (name) => `<span class="material-symbols-outlined text-[20px] text-on-surface-variant">${name}</span>`;
+    return `
+          <div class="relative profile-menu">
+            <button type="button" id="profileMenuBtn" aria-expanded="false" aria-haspopup="menu"
+              class="nav-link font-label text-label-sm flex items-center gap-2 px-2 py-1.5 rounded-lg transition ${profileActive ? 'is-active text-primary' : 'text-on-surface-variant hover:text-primary'}">
+              <span class="w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center ring-1 ring-primary/20">${initials}</span>
+              <span class="hidden lg:inline max-w-[120px] truncate">${currentUser.name.split(' ')[0]}</span>
+              <span class="material-symbols-outlined text-[18px] profile-chevron transition-transform duration-200">expand_more</span>
+            </button>
+            <div id="profileDropdown" role="menu" class="hidden absolute right-0 top-[calc(100%+10px)] w-72 bg-surface-container-lowest rounded-xl border border-outline-variant/30 shadow-xl py-2 z-[70]">
+              <div class="px-4 py-3 border-b border-outline-variant/20 mb-1">
+                <p class="font-display text-base text-primary truncate">${currentUser.name}</p>
+                <p class="text-xs text-on-surface-variant truncate mt-0.5">${currentUser.email}</p>
+              </div>
+              ${profileMenuLink('profile.html', icon('person'), 'My profile')}
+              ${profileMenuLink('orders.html', icon('inventory_2'), 'My orders')}
+              ${profileMenuLink('profile.html#password', icon('lock_reset'), 'Change password')}
+              ${currentUser.role === 'admin' ? profileMenuLink('admin.html', icon('dashboard'), 'Admin dashboard') : ''}
+              <div class="border-t border-outline-variant/20 mt-1 pt-1">
+                ${profileMenuLink('#', icon('logout'), 'Sign out', { button: true, danger: true, attrs: 'data-logout id="navLogoutBtn"' })}
+              </div>
+            </div>
+          </div>`;
+  }
+
+  function profileNavDrawer(activePage) {
+    if (!currentUser) return '';
+    const initials = userInitials(currentUser.name);
+    const icon = (name) => `<span class="material-symbols-outlined text-[22px]">${name}</span>`;
+    return `
+        <div class="mt-4 pt-4 border-t border-outline-variant/30">
+          <div class="flex items-center gap-3 px-4 py-3 mb-2">
+            <span class="w-11 h-11 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center ring-1 ring-primary/20">${initials}</span>
+            <div class="min-w-0">
+              <p class="font-display text-lg text-primary truncate">${currentUser.name}</p>
+              <p class="text-xs text-on-surface-variant truncate">${currentUser.email}</p>
+            </div>
+          </div>
+          <a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='profile'?'is-active':''}" href="profile.html">${icon('person')} My profile</a>
+          <a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='orders'?'is-active':''}" href="orders.html">${icon('inventory_2')} My orders</a>
+          <a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition" href="profile.html#password">${icon('lock_reset')} Change password</a>
+          ${currentUser.role === 'admin' ? `<a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='admin'?'is-active':''}" href="admin.html">${icon('dashboard')} Admin</a>` : ''}
+          <button type="button" class="drawer-link flex items-center gap-3 w-full text-left px-4 py-3 rounded-lg font-body text-base text-error hover:bg-error/5 transition mt-1" data-logout id="logoutDrawerBtn">${icon('logout')} Sign out</button>
+        </div>`;
+  }
+
   function navHTML(activePage) {
-    const adminItem = currentUser && currentUser.role === 'admin'
-      ? `<a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${activePage==='admin'?'is-active':''}" href="admin.html">Admin</a>` : '';
-    const adminDrawerItem = currentUser && currentUser.role === 'admin'
-      ? `<a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='admin'?'is-active':''}" href="admin.html">Admin</a>` : '';
-    const authLabel = currentUser ? 'My Orders' : 'Login';
-    const authHref  = currentUser ? 'orders.html' : 'auth.html';
-    const authActive = (currentUser && activePage==='orders') || (!currentUser && activePage==='auth');
-    const logoutItem = currentUser
-      ? `<button class="nav-link font-label text-label-sm text-on-surface-variant hover:text-error transition flex items-center gap-1" id="navLogoutBtn" title="Logout from ${currentUser.email}">
-           <span class="material-symbols-outlined text-[18px]">logout</span>
-           <span>Logout</span>
-         </button>` : '';
+    const adminItem = '';
+    const adminDrawerItem = '';
+    const authLabel = 'Login';
+    const authHref  = 'auth.html';
+    const authActive = !currentUser && activePage === 'auth';
+    const profileNav = profileNavDesktop(activePage);
+    const loginNav = currentUser ? '' : `<a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${authActive?'is-active':''}" href="${authHref}">${authLabel}</a>`;
 
     return `
     <div class="bg-primary text-on-primary py-2 text-center">
@@ -131,9 +210,8 @@
           <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${activePage==='shop'?'is-active':''}" href="shop.html">Shop</a>
           <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${activePage==='events'?'is-active':''}" href="events.html">Events</a>
           <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${activePage==='contact'?'is-active':''}" href="contact.html">Contact</a>
-          <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${authActive?'is-active':''}" href="${authHref}">${authLabel}</a>
-          ${adminItem}
-          ${logoutItem}
+          ${loginNav}
+          ${profileNav}
           <a class="relative" href="favorites.html" aria-label="Favourites">
             <span class="material-symbols-outlined text-primary text-[28px]">favorite</span>
             <span class="absolute -top-2 -right-2 bg-secondary text-on-secondary text-[10px] min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-full font-bold ${favorites.length ? '' : 'hidden'}" data-fav-badge>${favorites.length}</span>
@@ -173,9 +251,8 @@
         <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='contact'?'is-active':''}" href="contact.html">Contact</a>
         <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='favorites'?'is-active':''}" href="favorites.html">Favourites</a>
         <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='cart'?'is-active':''}" href="cart.html">Cart</a>
-        <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${authActive?'is-active':''}" href="${authHref}">${authLabel}</a>
-        ${adminDrawerItem}
-        ${currentUser ? `<button class="drawer-link block w-full text-left px-4 py-4 rounded-lg font-display text-2xl text-on-surface-variant hover:bg-surface-container-low transition" id="logoutDrawerBtn">Logout</button>` : ''}
+        ${currentUser ? '' : `<a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${authActive?'is-active':''}" href="${authHref}">${authLabel}</a>`}
+        ${profileNavDrawer(activePage)}
       </nav>
       <div class="mt-auto p-6 border-t border-outline-variant/30 text-center">
         <p class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant">${currentUser ? 'Signed in as ' + currentUser.email : 'Crafted with botanical poetry'}</p>
@@ -271,9 +348,42 @@
     if (!drawer || !overlay) return;
     const openD = () => { drawer.classList.add('open'); overlay.classList.add('open'); document.body.classList.add('menu-open'); };
     const closeD = () => { drawer.classList.remove('open'); overlay.classList.remove('open'); document.body.classList.remove('menu-open'); };
-    if (open) open.addEventListener('click', openD);
-    if (close) close.addEventListener('click', closeD);
-    overlay.addEventListener('click', closeD);
+    if (open && !open._floraBound) { open._floraBound = true; open.addEventListener('click', openD); }
+    if (close && !close._floraBound) { close._floraBound = true; close.addEventListener('click', closeD); }
+    if (!overlay._floraBound) { overlay._floraBound = true; overlay.addEventListener('click', closeD); }
+  }
+
+  function setupProfileMenu() {
+    const btn = document.getElementById('profileMenuBtn');
+    const menu = document.getElementById('profileDropdown');
+    if (!btn || !menu) return;
+    const chevron = btn.querySelector('.profile-chevron');
+    const close = () => {
+      menu.classList.add('hidden');
+      btn.setAttribute('aria-expanded', 'false');
+      if (chevron) chevron.classList.remove('rotate-180');
+    };
+    const open = () => {
+      menu.classList.remove('hidden');
+      btn.setAttribute('aria-expanded', 'true');
+      if (chevron) chevron.classList.add('rotate-180');
+    };
+    if (!btn._floraBound) {
+      btn._floraBound = true;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.contains('hidden') ? open() : close();
+      });
+    }
+    if (!menu._floraBound) {
+      menu._floraBound = true;
+      document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target) && !btn.contains(e.target)) close();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') close();
+      });
+    }
   }
 
   function bindLogoutButtons() {
@@ -286,7 +396,7 @@
       });
     });
     // Also wire up the legacy id-based buttons
-    ['navLogoutBtn', 'logoutDrawerBtn', 'logoutBtn', 'adminLogoutBtn'].forEach(id => {
+    ['navLogoutBtn', 'logoutDrawerBtn', 'logoutBtn', 'adminLogoutBtn', 'profileLogoutBtn'].forEach(id => {
       const el = document.getElementById(id);
       if (el && !el._floraBound) {
         el._floraBound = true;
@@ -998,17 +1108,7 @@
     if (!el) return;
     clearInterval(resendTimer);
     if (currentUser) {
-      el.innerHTML = `
-        <div class="max-w-md mx-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-8 md:p-10 reveal">
-          <span class="material-symbols-outlined text-5xl text-primary mb-4 block text-center">spa</span>
-          <h2 class="font-display text-headline-md text-primary text-center mb-2">Welcome, ${currentUser.name}</h2>
-          <p class="text-center text-on-surface-variant mb-8">Logged in as ${currentUser.email}</p>
-          <a class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition mb-3 block text-center" href="orders.html">My Orders</a>
-          ${currentUser.role === 'admin' ? `<a class="w-full bg-secondary text-on-secondary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition mb-3 block text-center" href="admin.html">Admin Dashboard</a>` : ''}
-          <button class="w-full border border-outline-variant/40 text-on-surface-variant py-3 rounded-lg font-label text-label-sm hover:border-primary hover:text-primary transition" id="logoutBtn">Logout</button>
-        </div>`;
-      bindLogoutButtons();
-      applyReveal();
+      location.replace('profile.html');
       return;
     }
 
@@ -1202,38 +1302,210 @@
 
   function initAuth() { renderAuth(); }
 
+  let profilePasswordStep = 'idle'; // idle | code-sent | done
+
+  function renderProfilePasswordPanel() {
+    const panel = document.getElementById('profilePasswordPanel');
+    if (!panel || !currentUser) return;
+
+    if (profilePasswordStep === 'code-sent' && pendingReset) {
+      panel.innerHTML = `
+        <p class="text-sm text-on-surface-variant mb-4">Enter the 6-digit code sent to <strong class="text-on-surface">${pendingReset.email}</strong></p>
+        <label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Verification code</label>
+        <input class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg mb-4 text-center tracking-[0.35em] font-display text-xl" id="profileResetPin" placeholder="000000" inputmode="numeric" maxlength="6"/>
+        <label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">New password</label>
+        <input type="password" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg mb-4 focus:outline-none focus:border-primary" id="profileResetPass" placeholder="Min. 6 characters" autocomplete="new-password"/>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <button type="button" class="flex-1 bg-primary text-on-primary py-3 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="profileResetSubmit">Update password</button>
+          <button type="button" class="flex-1 border border-outline-variant/40 text-on-surface-variant py-3 rounded-lg font-label text-label-sm hover:border-primary hover:text-primary transition" id="profileResetCancel">Cancel</button>
+        </div>`;
+      const pinInput = document.getElementById('profileResetPin');
+      pinInput.addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); });
+      document.getElementById('profileResetCancel').addEventListener('click', () => {
+        profilePasswordStep = 'idle';
+        pendingReset = null;
+        renderProfilePasswordPanel();
+      });
+      document.getElementById('profileResetSubmit').addEventListener('click', async () => {
+        const pin = pinInput.value;
+        const password = document.getElementById('profileResetPass').value;
+        if (!/^\d{6}$/.test(pin)) { toast('Enter the 6-digit code'); return; }
+        if (password.length < 6) { toast('Password must be at least 6 characters'); return; }
+        const btn = document.getElementById('profileResetSubmit');
+        btn.disabled = true;
+        try {
+          await Api.resetPassword({ email: pendingReset.email, pin, password });
+          profilePasswordStep = 'done';
+          pendingReset = null;
+          toast('Password updated successfully');
+          renderProfilePasswordPanel();
+        } catch (e) {
+          btn.disabled = false;
+          toast(e.message || 'Could not update password');
+        }
+      });
+      return;
+    }
+
+    if (profilePasswordStep === 'done') {
+      panel.innerHTML = `<p class="text-sm text-success flex items-center gap-2"><span class="material-symbols-outlined">check_circle</span> Your password was updated.</p>`;
+      return;
+    }
+
+    panel.innerHTML = `
+      <p class="text-sm text-on-surface-variant mb-4">We'll email a verification code to <strong class="text-on-surface">${currentUser.email}</strong> to confirm it's you.</p>
+      <button type="button" class="bg-primary text-on-primary px-6 py-3 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="profileSendCodeBtn">Send verification code</button>`;
+    document.getElementById('profileSendCodeBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('profileSendCodeBtn');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      try {
+        await Api.forgotPassword({ email: currentUser.email });
+        pendingReset = { email: currentUser.email };
+        profilePasswordStep = 'code-sent';
+        toast('Check your email for the code');
+        renderProfilePasswordPanel();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Send verification code';
+        toast(e.message || 'Could not send code');
+      }
+    });
+  }
+
+  function initProfile() {
+    const el = document.getElementById('profileContent');
+    if (!el) return;
+    if (!currentUser) {
+      el.innerHTML = `
+        <div class="text-center py-16 reveal max-w-md mx-auto">
+          <span class="material-symbols-outlined text-5xl text-primary/40 mb-4">person</span>
+          <h2 class="font-display text-headline-md text-on-surface mb-3">Sign in to view your profile</h2>
+          <a class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition inline-block" href="auth.html">Login</a>
+        </div>`;
+      applyReveal();
+      return;
+    }
+
+    const initials = userInitials(currentUser.name);
+    profilePasswordStep = location.hash === '#password' ? 'idle' : profilePasswordStep;
+
+    el.innerHTML = `
+      <div class="max-w-2xl mx-auto space-y-6">
+        <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal flex items-center gap-5">
+          <span class="w-16 h-16 md:w-20 md:h-20 rounded-full bg-primary/10 text-primary text-xl md:text-2xl font-bold flex items-center justify-center ring-2 ring-primary/15 shrink-0">${initials}</span>
+          <div class="min-w-0">
+            <h2 class="font-display text-headline-md text-primary truncate">${currentUser.name}</h2>
+            <p class="text-on-surface-variant truncate">${currentUser.email}</p>
+            ${currentUser.role === 'admin' ? '<span class="inline-block mt-2 font-label text-[10px] uppercase tracking-widest bg-secondary/15 text-secondary px-2 py-1 rounded-full">Administrator</span>' : ''}
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 reveal">
+          <a href="orders.html" class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-5 hover:border-primary/40 hover:shadow-md transition group">
+            <span class="material-symbols-outlined text-primary text-3xl mb-3 block">inventory_2</span>
+            <h3 class="font-display text-lg text-on-surface group-hover:text-primary transition">My orders</h3>
+            <p class="text-sm text-on-surface-variant mt-1">Track purchases &amp; delivery status</p>
+          </a>
+          ${currentUser.role === 'admin' ? `
+          <a href="admin.html" class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-5 hover:border-primary/40 hover:shadow-md transition group">
+            <span class="material-symbols-outlined text-secondary text-3xl mb-3 block">dashboard</span>
+            <h3 class="font-display text-lg text-on-surface group-hover:text-primary transition">Admin dashboard</h3>
+            <p class="text-sm text-on-surface-variant mt-1">Manage shop &amp; reservations</p>
+          </a>` : `
+          <a href="favorites.html" class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-5 hover:border-primary/40 hover:shadow-md transition group">
+            <span class="material-symbols-outlined text-primary text-3xl mb-3 block">favorite</span>
+            <h3 class="font-display text-lg text-on-surface group-hover:text-primary transition">Favourites</h3>
+            <p class="text-sm text-on-surface-variant mt-1">Saved bouquets &amp; gifts</p>
+          </a>`}
+        </div>
+        <div id="password" class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal scroll-mt-28">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="material-symbols-outlined text-primary text-3xl">lock_reset</span>
+            <h3 class="font-display text-xl text-primary">Change password</h3>
+          </div>
+          <div id="profilePasswordPanel"></div>
+        </div>
+        <div class="reveal pt-2">
+          <button type="button" class="w-full sm:w-auto flex items-center justify-center gap-2 border border-outline-variant/40 text-on-surface-variant px-8 py-3 rounded-lg font-label text-label-sm uppercase tracking-widest hover:border-error hover:text-error transition" data-logout id="profileLogoutBtn">
+            <span class="material-symbols-outlined text-[20px]">logout</span>
+            Sign out
+          </button>
+        </div>
+      </div>`;
+
+    bindLogoutButtons();
+    renderProfilePasswordPanel();
+    if (location.hash === '#password') {
+      const block = document.getElementById('password');
+      if (block) setTimeout(() => block.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+    }
+    applyReveal();
+  }
+
   function initContact() {
     const el = document.getElementById('contactContent');
     if (!el) return;
+    const s = STORE_INFO;
     el.innerHTML = `
-      <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal">
-        <div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Your Name</label>
-        <input class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="cName" placeholder="Full name" autocomplete="name"/></div>
-        <div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Email</label>
-        <input type="email" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="cEmail" placeholder="email@example.com" autocomplete="email"/></div>
-        <div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Subject</label>
-        <input class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="cSubject" placeholder="Order inquiry, custom bouquet…"/></div>
-        <div class="mb-6"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Message</label>
-        <textarea class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary min-h-[140px] resize-y" id="cMessage" placeholder="How can we help?"></textarea></div>
-        <button class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="contactSubmit">Send message</button>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
+        <div class="space-y-4 md:space-y-5">
+          <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal flex gap-5">
+            <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-primary">location_on</span>
+            </div>
+            <div>
+              <h3 class="font-display text-xl text-primary mb-2">Visit Our Atelier</h3>
+              <p class="text-on-surface font-medium">${s.address}</p>
+              <p class="text-on-surface-variant">${s.city}</p>
+              <p class="text-on-surface-variant text-sm mt-1">${s.country}</p>
+              <a class="inline-flex items-center gap-1 mt-3 font-label text-label-sm text-primary hover:text-secondary transition" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.mapQuery)}" target="_blank" rel="noopener noreferrer">
+                Get directions <span class="material-symbols-outlined text-[16px]">arrow_outward</span>
+              </a>
+            </div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal flex gap-5">
+            <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-primary">call</span>
+            </div>
+            <div>
+              <h3 class="font-display text-xl text-primary mb-2">Phone &amp; WhatsApp</h3>
+              <a class="block text-on-surface hover:text-primary transition font-medium" href="${s.phoneHref}">${s.phone}</a>
+              <a class="block text-on-surface-variant hover:text-primary transition mt-2 text-sm" href="${s.whatsappHref}" target="_blank" rel="noopener noreferrer">WhatsApp: ${s.whatsapp}</a>
+            </div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal flex gap-5">
+            <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-primary">mail</span>
+            </div>
+            <div>
+              <h3 class="font-display text-xl text-primary mb-2">Email</h3>
+              <a class="text-on-surface hover:text-primary transition font-medium" href="${s.emailHref}">${s.email}</a>
+              <p class="text-on-surface-variant text-sm mt-2">Orders, custom bouquets &amp; events — we reply within 1–2 business days.</p>
+            </div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal flex gap-5">
+            <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-primary">schedule</span>
+            </div>
+            <div class="w-full">
+              <h3 class="font-display text-xl text-primary mb-3">Opening Hours</h3>
+              <ul class="space-y-2">
+                ${s.hours.map(h => `
+                  <li class="flex justify-between gap-4 text-sm border-b border-outline-variant/20 pb-2 last:border-0 last:pb-0">
+                    <span class="text-on-surface-variant">${h.days}</span>
+                    <span class="text-on-surface font-medium">${h.time}</span>
+                  </li>`).join('')}
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="reveal">
+          <div class="rounded-xl overflow-hidden border border-outline-variant/30 shadow-sm aspect-[4/3] lg:aspect-auto lg:min-h-[520px] bg-surface-container-low">
+            <iframe class="w-full h-full min-h-[320px] lg:min-h-[520px] border-0" title="Flora &amp; Gifts location" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${s.mapEmbed}"></iframe>
+          </div>
+          <p class="text-center text-xs text-on-surface-variant mt-4 font-label uppercase tracking-widest">${s.name}</p>
+        </div>
       </div>`;
-    document.getElementById('contactSubmit').addEventListener('click', async () => {
-      const btn = document.getElementById('contactSubmit');
-      btn.disabled = true; btn.textContent = 'Sending...';
-      try {
-        const res = await Api.submitContact({
-          name: document.getElementById('cName').value.trim(),
-          email: document.getElementById('cEmail').value.trim(),
-          subject: document.getElementById('cSubject').value.trim(),
-          message: document.getElementById('cMessage').value.trim(),
-        });
-        el.innerHTML = `<div class="text-center py-12 reveal"><span class="material-symbols-outlined text-5xl text-primary mb-4">mark_email_read</span><p class="text-on-surface-variant">${res.message || 'Message sent!'}</p></div>`;
-        toast('Message sent');
-      } catch (e) {
-        btn.disabled = false; btn.textContent = 'Send message';
-        toast(e.message || 'Could not send message');
-      }
-    });
     applyReveal();
   }
 
@@ -1515,6 +1787,7 @@
     //    slow or unreachable.
     injectLayout();
     setupDrawer();
+    setupProfileMenu();
     bindLogoutButtons();
     updateCartBadge();
     updateFavoritesBadge();
@@ -1529,6 +1802,7 @@
       if (userBefore !== userAfter) {
         injectLayout();
         setupDrawer();
+        setupProfileMenu();
         bindLogoutButtons();
         updateCartBadge();
         updateFavoritesBadge();
@@ -1537,7 +1811,7 @@
 
     // 3. Initialize the current page in parallel with the session refresh.
     const page = document.body.dataset.page;
-    const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites }[page];
+    const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites, profile:initProfile }[page];
     if (init) {
       try { await init(); }
       catch (e) { console.error(e); toast(e.message || 'Page error'); }

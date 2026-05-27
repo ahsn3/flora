@@ -48,7 +48,16 @@ async function initDb() {
       email TEXT PRIMARY KEY,
       pin_hash TEXT NOT NULL,
       attempts INT NOT NULL DEFAULT 0,
+      purpose TEXT NOT NULL DEFAULT 'signup',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS contact_messages (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      subject TEXT,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
@@ -92,6 +101,7 @@ async function initDb() {
 
   // Schema upgrade for older deployments — add email_verified column if missing
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE email_pins ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'signup'`);
   console.log('✓ Schema ready');
 
   const adminEmail = 'admin@flora.com';
@@ -108,22 +118,23 @@ async function initDb() {
     await pool.query("UPDATE users SET email_verified = TRUE WHERE email = $1 AND email_verified = FALSE", [adminEmail]);
   }
 
-  const productCount = await pool.query('SELECT COUNT(*)::int AS c FROM products');
-  if (productCount.rows[0].c === 0) {
-    const seedProducts = require('./db/seed-products.js');
-    for (const p of seedProducts) {
-      await pool.query(
-        `INSERT INTO products (name, tagline, category, price, image, description, wrapping, card_available, stock, attributes, care, gallery)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [p.name, p.tagline || null, p.category, p.price, p.image || null, p.desc || null,
-         JSON.stringify(p.wrapping || []), p.card !== false, p.stock || 0,
-         p.attributes ? JSON.stringify(p.attributes) : null,
-         p.care ? JSON.stringify(p.care) : null,
-         p.gallery ? JSON.stringify(p.gallery) : null]
-      );
-    }
-    console.log(`✓ Seeded ${seedProducts.length} products`);
+  const seedProducts = require('./db/seed-products.js');
+  let productsAdded = 0;
+  for (const p of seedProducts) {
+    const exists = await pool.query('SELECT id FROM products WHERE name=$1', [p.name]);
+    if (exists.rows.length) continue;
+    await pool.query(
+      `INSERT INTO products (name, tagline, category, price, image, description, wrapping, card_available, stock, attributes, care, gallery)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [p.name, p.tagline || null, p.category, p.price, p.image || null, p.desc || null,
+       JSON.stringify(p.wrapping || []), p.card !== false, p.stock || 0,
+       p.attributes ? JSON.stringify(p.attributes) : null,
+       p.care ? JSON.stringify(p.care) : null,
+       p.gallery ? JSON.stringify(p.gallery) : null]
+    );
+    productsAdded += 1;
   }
+  if (productsAdded) console.log(`✓ Added ${productsAdded} new product(s) to catalog`);
 
   const resvCount = await pool.query('SELECT COUNT(*)::int AS c FROM reservations');
   if (resvCount.rows[0].c === 0) {
@@ -201,6 +212,56 @@ function isValidEmail(s) {
   return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
+function emailSendErrorHint(err) {
+  const msg = String(err && err.message ? err.message : err);
+  if (/Invalid grant|reconnect your Gmail/i.test(msg)) {
+    return 'Your Gmail link in EmailJS expired. Open EmailJS → Email Services → reconnect Gmail, then try again.';
+  }
+  if (/EmailJS/i.test(msg)) return `Could not send via EmailJS. (${msg.replace(/^EmailJS \d+: /, '')})`;
+  if (/only send testing emails to your own email/i.test(msg)) {
+    return 'With Resend’s free test sender, codes can only go to the Gmail on your Resend account, or verify your domain at resend.com/domains.';
+  }
+  if (/Resend API/i.test(msg)) return msg.replace(/^Resend API \d+: /, 'Email error: ');
+  if (/invalid login|auth|535|credentials/i.test(msg)) {
+    return 'Email credentials were rejected — check EMAILJS_* or RESEND_API_KEY on Railway.';
+  }
+  if (/ENETUNREACH|network unreachable/i.test(msg)) {
+    return 'Email server unreachable from Railway. Use EmailJS or Resend (see README).';
+  }
+  if (/timeout|timed out/i.test(msg)) {
+    return `Email timed out (${getEmailProviderStatus().provider}). Try again shortly.`;
+  }
+  return 'Could not send email. Please try again shortly.';
+}
+
+async function issuePinEmail(lower, pin, purpose) {
+  const recent = await pool.query('SELECT created_at FROM email_pins WHERE email=$1', [lower]);
+  if (recent.rows.length) {
+    const ms = Date.now() - new Date(recent.rows[0].created_at).getTime();
+    if (ms < PIN_RESEND_COOLDOWN_MS) {
+      const wait = Math.ceil((PIN_RESEND_COOLDOWN_MS - ms) / 1000);
+      const err = new Error(`Please wait ${wait}s before requesting another code.`);
+      err.status = 429;
+      throw err;
+    }
+  }
+  try {
+    await sendPinEmail(lower, pin, { purpose });
+  } catch (err) {
+    console.error('sendPinEmail failed:', err && err.message ? err.message : err);
+    const e = new Error(emailSendErrorHint(err));
+    e.status = 502;
+    throw e;
+  }
+  const pinHash = await bcrypt.hash(pin, 10);
+  await pool.query(
+    `INSERT INTO email_pins (email, pin_hash, attempts, purpose, created_at)
+     VALUES ($1, $2, 0, $3, NOW())
+     ON CONFLICT (email) DO UPDATE SET pin_hash = EXCLUDED.pin_hash, attempts = 0, purpose = EXCLUDED.purpose, created_at = NOW()`,
+    [lower, pinHash, purpose]
+  );
+}
+
 /** POST /api/auth/send-pin
  *  Body: { email }
  *  Stores a 10-minute, single-use PIN keyed by email (case-insensitive) and
@@ -215,50 +276,12 @@ app.post('/api/auth/send-pin', wrap(async (req, res) => {
     return res.status(409).json({ error: 'This email is already registered. Try logging in.' });
   }
 
-  const recent = await pool.query('SELECT created_at FROM email_pins WHERE email=$1', [lower]);
-  if (recent.rows.length) {
-    const ms = Date.now() - new Date(recent.rows[0].created_at).getTime();
-    if (ms < PIN_RESEND_COOLDOWN_MS) {
-      const wait = Math.ceil((PIN_RESEND_COOLDOWN_MS - ms) / 1000);
-      return res.status(429).json({ error: `Please wait ${wait}s before requesting another code.` });
-    }
-  }
-
   const pin = generatePin();
-
-  // Try to send the email FIRST. Only persist the PIN if delivery succeeded,
-  // so a failed send doesn't lock the user out via the resend cooldown.
   try {
-    await sendPinEmail(lower, pin);
+    await issuePinEmail(lower, pin, 'signup');
   } catch (err) {
-    console.error('sendPinEmail failed:', err && err.message ? err.message : err);
-    const msg = String(err && err.message ? err.message : err);
-    const hint = /Invalid grant|reconnect your Gmail/i.test(msg)
-      ? 'Your Gmail link in EmailJS expired. Open EmailJS → Email Services → your Gmail service → Reconnect account, then try again.'
-      : /EmailJS/i.test(msg)
-      ? `Could not send via EmailJS. (${msg.replace(/^EmailJS \d+: /, '')})`
-      : /only send testing emails to your own email/i.test(msg)
-      ? 'With Resend’s free test sender, codes can only go to the Gmail on your Resend account. Sign up with that email, or verify your domain at resend.com/domains.'
-      : /Resend API/i.test(msg)
-      ? msg.replace(/^Resend API \d+: /, 'Email error: ')
-      : /invalid login|auth|535|credentials/i.test(msg)
-      ? 'Email credentials were rejected — use a Gmail App Password, or switch to RESEND_API_KEY on Railway.'
-      : /ENETUNREACH|network unreachable/i.test(msg)
-      ? 'Gmail SMTP cannot reach the network from Railway. Add RESEND_API_KEY in Railway Variables (free at resend.com).'
-      : /timeout|timed out/i.test(msg)
-      ? `Email via ${getEmailProviderStatus().provider} timed out. For EmailJS, set all four EMAILJS_* vars and remove SMTP_* / RESEND_API_KEY from Railway.`
-      : 'Could not send verification email. Please try again shortly.';
-    return res.status(502).json({ error: hint });
+    return res.status(err.status || 502).json({ error: err.message });
   }
-
-  const pinHash = await bcrypt.hash(pin, 10);
-  await pool.query(
-    `INSERT INTO email_pins (email, pin_hash, attempts, created_at)
-     VALUES ($1, $2, 0, NOW())
-     ON CONFLICT (email) DO UPDATE SET pin_hash = EXCLUDED.pin_hash, attempts = 0, created_at = NOW()`,
-    [lower, pinHash]
-  );
-
   res.json({ ok: true, email: lower, expiresInSec: PIN_TTL_MS / 1000, devMode: !smtpEnabled });
 }));
 
@@ -278,7 +301,10 @@ app.post('/api/auth/register', wrap(async (req, res) => {
     return res.status(409).json({ error: 'Email is already registered' });
   }
 
-  const pinRow = await pool.query('SELECT pin_hash, attempts, created_at FROM email_pins WHERE email=$1', [lower]);
+  const pinRow = await pool.query(
+    'SELECT pin_hash, attempts, created_at FROM email_pins WHERE email=$1 AND purpose=$2',
+    [lower, 'signup']
+  );
   if (!pinRow.rows.length) return res.status(400).json({ error: 'No verification code on file. Please request a new one.' });
 
   const { pin_hash, attempts, created_at } = pinRow.rows[0];
@@ -335,6 +361,86 @@ app.get('/api/auth/me', auth(true), wrap(async (req, res) => {
   const { rows } = await pool.query('SELECT id, name, email, role, email_verified FROM users WHERE id=$1', [req.user.id]);
   if (!rows.length) return res.status(404).json({ error: 'User not found' });
   res.json({ user: rows[0] });
+}));
+
+/** POST /api/auth/forgot-password — emails a 6-digit reset code if the account exists */
+app.post('/api/auth/forgot-password', wrap(async (req, res) => {
+  const { email } = req.body || {};
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'A valid email is required' });
+  const lower = email.toLowerCase().trim();
+  const user = await pool.query('SELECT id, email_verified FROM users WHERE email=$1', [lower]);
+  if (user.rows.length && user.rows[0].email_verified) {
+    const pin = generatePin();
+    try {
+      await issuePinEmail(lower, pin, 'reset');
+    } catch (err) {
+      return res.status(err.status || 502).json({ error: err.message });
+    }
+  }
+  res.json({
+    ok: true,
+    message: 'If an account exists for this email, we sent a reset code.',
+    expiresInSec: PIN_TTL_MS / 1000,
+  });
+}));
+
+/** POST /api/auth/reset-password — verify reset code and set new password */
+app.post('/api/auth/reset-password', wrap(async (req, res) => {
+  const { email, pin, password } = req.body || {};
+  if (!isValidEmail(email) || !pin || !password) {
+    return res.status(400).json({ error: 'Email, code, and new password are required' });
+  }
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (!/^\d{6}$/.test(String(pin))) return res.status(400).json({ error: 'Reset code must be 6 digits' });
+  const lower = email.toLowerCase().trim();
+
+  const user = await pool.query('SELECT id FROM users WHERE email=$1 AND email_verified=TRUE', [lower]);
+  if (!user.rows.length) return res.status(400).json({ error: 'No verified account found for this email' });
+
+  const pinRow = await pool.query(
+    'SELECT pin_hash, attempts, created_at FROM email_pins WHERE email=$1 AND purpose=$2',
+    [lower, 'reset']
+  );
+  if (!pinRow.rows.length) return res.status(400).json({ error: 'No reset code on file. Request a new one.' });
+
+  const { pin_hash, attempts, created_at } = pinRow.rows[0];
+  if (Date.now() - new Date(created_at).getTime() > PIN_TTL_MS) {
+    await pool.query('DELETE FROM email_pins WHERE email=$1', [lower]);
+    return res.status(400).json({ error: 'Reset code expired. Request a new one.' });
+  }
+  if (attempts >= PIN_MAX_ATTEMPTS) {
+    await pool.query('DELETE FROM email_pins WHERE email=$1', [lower]);
+    return res.status(429).json({ error: 'Too many attempts. Request a new code.' });
+  }
+  const pinOk = await bcrypt.compare(String(pin), pin_hash);
+  if (!pinOk) {
+    await pool.query('UPDATE email_pins SET attempts = attempts + 1 WHERE email=$1', [lower]);
+    return res.status(400).json({ error: 'Incorrect reset code' });
+  }
+
+  await pool.query('DELETE FROM email_pins WHERE email=$1', [lower]);
+  const hash = await bcrypt.hash(password, 10);
+  await pool.query('UPDATE users SET password_hash=$1 WHERE email=$2', [hash, lower]);
+  res.json({ ok: true, message: 'Password updated. You can sign in now.' });
+}));
+
+// ─── CONTACT ────────────────────────────────────────────────────────
+app.post('/api/contact', wrap(async (req, res) => {
+  const { name, email, subject, message } = req.body || {};
+  if (!name || !isValidEmail(email) || !message) {
+    return res.status(400).json({ error: 'Name, valid email, and message are required' });
+  }
+  const cleanName = String(name).trim().slice(0, 120);
+  const cleanEmail = email.toLowerCase().trim();
+  const cleanSubject = String(subject || 'General inquiry').trim().slice(0, 200);
+  const cleanMessage = String(message).trim().slice(0, 5000);
+  if (cleanMessage.length < 10) return res.status(400).json({ error: 'Message must be at least 10 characters' });
+
+  await pool.query(
+    'INSERT INTO contact_messages (name, email, subject, message) VALUES ($1,$2,$3,$4)',
+    [cleanName, cleanEmail, cleanSubject, cleanMessage]
+  );
+  res.json({ ok: true, message: 'Thank you — we will reply within 1–2 business days.' });
 }));
 
 // ─── PRODUCTS ───────────────────────────────────────────────────────

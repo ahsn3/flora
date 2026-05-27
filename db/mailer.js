@@ -126,12 +126,15 @@ function pinEmailHtml(pin, email) {
 </html>`;
 }
 
-function pinEmailText(pin) {
+function pinEmailText(pin, purpose = 'signup') {
+  if (purpose === 'reset') {
+    return `Flora & Gifts password reset\n\nYour reset code is: ${pin}\n\nIt expires in 10 minutes. If you didn't request this, ignore this email.\n\n— Flora & Gifts`;
+  }
   return `Welcome to Flora & Gifts.\n\nYour verification code is: ${pin}\n\nIt expires in 10 minutes. If you didn't request this, you can ignore this email.\n\n— Flora & Gifts`;
 }
 
 /** Server-side EmailJS — same Gmail service you use in the EmailJS dashboard. */
-async function sendViaEmailjs(to, pin) {
+async function sendViaEmailjs(to, pin, purpose = 'signup') {
   const payload = {
     service_id: EMAILJS_SERVICE_ID,
     template_id: EMAILJS_TEMPLATE_ID,
@@ -142,7 +145,7 @@ async function sendViaEmailjs(to, pin) {
       user_email: to,
       pin,
       passcode: pin,
-      message: pinEmailText(pin),
+      message: pinEmailText(pin, purpose),
     },
   };
   if (EMAILJS_PRIVATE_KEY) payload.accessToken = EMAILJS_PRIVATE_KEY;
@@ -168,8 +171,10 @@ async function sendViaEmailjs(to, pin) {
   return { sent: true, provider: 'emailjs', messageId: parsed.id || 'ok' };
 }
 
-async function sendViaResend(to, pin) {
-  const subject = `Your Flora & Gifts verification code: ${pin}`;
+async function sendViaResend(to, pin, purpose = 'signup') {
+  const subject = purpose === 'reset'
+    ? `Your Flora & Gifts password reset code: ${pin}`
+    : `Your Flora & Gifts verification code: ${pin}`;
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -181,7 +186,7 @@ async function sendViaResend(to, pin) {
       to: [to],
       subject,
       html: pinEmailHtml(pin, to),
-      text: pinEmailText(pin),
+      text: pinEmailText(pin, purpose),
     }),
     signal: AbortSignal.timeout(20_000),
   });
@@ -194,14 +199,17 @@ async function sendViaResend(to, pin) {
   return { sent: true, provider: 'resend', messageId: body.id };
 }
 
-async function sendViaSmtp(to, pin) {
+async function sendViaSmtp(to, pin, purpose = 'signup') {
+  const subject = purpose === 'reset'
+    ? `Your Flora & Gifts password reset code: ${pin}`
+    : `Your Flora & Gifts verification code: ${pin}`;
   const t = await getTransporter();
   const info = await Promise.race([
     t.sendMail({
       from: FROM,
       to,
-      subject: `Your Flora & Gifts verification code: ${pin}`,
-      text: pinEmailText(pin),
+      subject,
+      text: pinEmailText(pin, purpose),
       html: pinEmailHtml(pin, to),
     }),
     new Promise((_, reject) =>
@@ -212,14 +220,15 @@ async function sendViaSmtp(to, pin) {
   return { sent: true, provider: 'smtp', messageId: info.messageId };
 }
 
-async function sendPinEmail(to, pin) {
-  if (useEmailjs) return sendViaEmailjs(to, pin);
-  if (useResend) return sendViaResend(to, pin);
-  if (useSmtp) return sendViaSmtp(to, pin);
+async function sendPinEmail(to, pin, options = {}) {
+  const purpose = options.purpose || 'signup';
+  if (useEmailjs) return sendViaEmailjs(to, pin, purpose);
+  if (useResend) return sendViaResend(to, pin, purpose);
+  if (useSmtp) return sendViaSmtp(to, pin, purpose);
   console.log(
-    `\n  ✉  [DEV MODE] PIN for ${to}: ${pin}\n     Set EMAILJS_* or RESEND_API_KEY in Railway to send real emails.\n`
+    `\n  ✉  [DEV MODE] ${purpose} PIN for ${to}: ${pin}\n     Set EMAILJS_* or RESEND_API_KEY in Railway to send real emails.\n`
   );
-  return { dev: true, pin };
+  return { dev: true, pin, purpose };
 }
 
 if (useEmailjs) {

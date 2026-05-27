@@ -10,6 +10,8 @@
   const WRAP_BASIC = 75, WRAP_LUX = 150, CARD_COST = 100, DELIVERY = 300;
   const eventServices = ['Wedding Full Package','Engagement Party','Birthday Celebration','Corporate Event','Baptism / Baby Shower','Anniversary Dinner'];
   const categories = ['all','flowers','gifts','wedding'];
+  const COVER_COLORS = ['Burgundy', 'Blush Pink', 'Ivory Cream', 'Sage Green', 'Midnight Navy'];
+  const FLOWER_COLORS = ['Classic Red', 'Soft Pink', 'Pure White', 'Lavender', 'Sunshine Yellow', 'Seasonal Mix'];
 
   // ─── PERSISTENCE (cart + token only) ──────────────────────────
   const KEY = 'flora.';
@@ -20,6 +22,7 @@
   };
 
   let cart = Store.get('cart', []);
+  let favorites = Store.get('favorites', []);
   let token = Store.get('token', null);
   let currentUser = Store.get('user', null);
   let products = [];
@@ -97,6 +100,9 @@
     adminReservations: () => api('/api/admin/reservations'),
     adminUpdateReservation: (id, status) => api('/api/admin/reservations/' + id, { method: 'PATCH', body: { status } }),
     adminDeleteReservation: (id) => api('/api/admin/reservations/' + id, { method: 'DELETE' }),
+    forgotPassword: (body) => api('/api/auth/forgot-password', { method: 'POST', body }),
+    resetPassword: (body) => api('/api/auth/reset-password', { method: 'POST', body }),
+    submitContact: (body) => api('/api/contact', { method: 'POST', body }),
   };
 
   // ─── LAYOUT TEMPLATES ─────────────────────────────────────────
@@ -124,15 +130,24 @@
         <div class="hidden md:flex items-center gap-10">
           <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${activePage==='shop'?'is-active':''}" href="shop.html">Shop</a>
           <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${activePage==='events'?'is-active':''}" href="events.html">Events</a>
+          <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${activePage==='contact'?'is-active':''}" href="contact.html">Contact</a>
           <a class="nav-link font-label text-label-sm text-on-surface-variant hover:text-primary transition ${authActive?'is-active':''}" href="${authHref}">${authLabel}</a>
           ${adminItem}
           ${logoutItem}
+          <a class="relative" href="favorites.html" aria-label="Favourites">
+            <span class="material-symbols-outlined text-primary text-[28px]">favorite</span>
+            <span class="absolute -top-2 -right-2 bg-secondary text-on-secondary text-[10px] min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-full font-bold ${favorites.length ? '' : 'hidden'}" data-fav-badge>${favorites.length}</span>
+          </a>
           <a class="relative" href="cart.html" aria-label="Cart">
             <span class="material-symbols-outlined text-primary text-[28px]">shopping_bag</span>
             <span class="absolute -top-2 -right-2 bg-primary text-on-primary text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold" data-cart-badge>0</span>
           </a>
         </div>
         <div class="md:hidden flex items-center gap-3">
+          <a class="relative" href="favorites.html" aria-label="Favourites">
+            <span class="material-symbols-outlined text-primary text-[26px]">favorite</span>
+            <span class="absolute -top-1.5 -right-1.5 bg-secondary text-on-secondary text-[10px] min-w-[1rem] h-4 px-0.5 flex items-center justify-center rounded-full font-bold ${favorites.length ? '' : 'hidden'}" data-fav-badge>${favorites.length}</span>
+          </a>
           <a class="relative" href="cart.html" aria-label="Cart">
             <span class="material-symbols-outlined text-primary text-[26px]">shopping_bag</span>
             <span class="absolute -top-1.5 -right-1.5 bg-primary text-on-primary text-[10px] w-4 h-4 flex items-center justify-center rounded-full font-bold" data-cart-badge>0</span>
@@ -155,6 +170,8 @@
         <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='home'?'is-active':''}" href="index.html">Home</a>
         <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='shop'?'is-active':''}" href="shop.html">Shop</a>
         <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='events'?'is-active':''}" href="events.html">Events</a>
+        <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='contact'?'is-active':''}" href="contact.html">Contact</a>
+        <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='favorites'?'is-active':''}" href="favorites.html">Favourites</a>
         <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${activePage==='cart'?'is-active':''}" href="cart.html">Cart</a>
         <a class="drawer-link block px-4 py-4 rounded-lg font-display text-2xl text-on-surface hover:bg-surface-container-low transition ${authActive?'is-active':''}" href="${authHref}">${authLabel}</a>
         ${adminDrawerItem}
@@ -191,7 +208,7 @@
               <span class="font-label text-label-sm text-primary uppercase tracking-widest mb-1">Company</span>
               <a class="text-on-surface-variant hover:text-primary transition" href="#">Our Story</a>
               <a class="text-on-surface-variant hover:text-primary transition" href="#">Sustainability</a>
-              <a class="text-on-surface-variant hover:text-primary transition" href="#">Contact</a>
+              <a class="text-on-surface-variant hover:text-primary transition" href="contact.html">Contact</a>
             </div>
             <div class="flex flex-col gap-3">
               <span class="font-label text-label-sm text-primary uppercase tracking-widest mb-1">Resources</span>
@@ -292,6 +309,60 @@
     document.querySelectorAll('[data-cart-badge]').forEach(el => el.textContent = String(count));
   }
 
+  function updateFavoritesBadge() {
+    const count = favorites.length;
+    document.querySelectorAll('[data-fav-badge]').forEach(el => {
+      el.textContent = String(count);
+      el.classList.toggle('hidden', count === 0);
+    });
+  }
+
+  function isFavorite(id) {
+    return favorites.includes(Number(id));
+  }
+
+  function toggleFavorite(id) {
+    const n = Number(id);
+    const i = favorites.indexOf(n);
+    if (i >= 0) favorites.splice(i, 1);
+    else favorites.push(n);
+    Store.set('favorites', favorites);
+    updateFavoritesBadge();
+    document.querySelectorAll('[data-fav="' + n + '"]').forEach(btn => {
+      const on = isFavorite(n);
+      const icon = btn.querySelector('.material-symbols-outlined');
+      if (icon) icon.textContent = on ? 'favorite' : 'favorite_border';
+      btn.classList.toggle('text-error', on);
+    });
+    toast(i >= 0 ? 'Removed from favourites' : 'Saved to favourites');
+  }
+
+  function formatCartOpts(opts) {
+    if (!opts) return '';
+    const parts = [];
+    if (opts.flowerColor) parts.push(opts.flowerColor);
+    if (opts.coverColor) parts.push(opts.coverColor + ' wrap');
+    if (opts.wrap) parts.push(opts.wrap);
+    if (opts.card) parts.push('Gift card');
+    if (opts.msg) {
+      const m = String(opts.msg);
+      parts.push('“' + m.slice(0, 40) + (m.length > 40 ? '…”' : '”'));
+    }
+    return parts.join(' · ');
+  }
+
+  function bindFavoriteButtons(root) {
+    (root || document).querySelectorAll('[data-fav]').forEach(btn => {
+      if (btn._favBound) return;
+      btn._favBound = true;
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFavorite(parseInt(btn.dataset.fav, 10));
+      });
+    });
+  }
+
   function loadingHTML(label) {
     return `<div class="text-center py-16 text-on-surface-variant"><span class="material-symbols-outlined animate-spin text-4xl text-primary block mb-3">refresh</span>${label || 'Loading...'}</div>`;
   }
@@ -343,6 +414,9 @@
     <a href="product.html?id=${p.id}" class="product-card group bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-500 flex flex-col h-full border border-outline-variant/10 cursor-pointer reveal block">
       <div class="aspect-[4/5] overflow-hidden bg-surface-container-low relative">
         <img alt="${p.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src="${p.image}" loading="lazy"/>
+        <button type="button" class="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-surface/90 backdrop-blur flex items-center justify-center shadow ${isFavorite(p.id) ? 'text-error' : 'text-on-surface-variant hover:text-error'}" data-fav="${p.id}" aria-label="Toggle favourite">
+          <span class="material-symbols-outlined text-[22px]">${isFavorite(p.id) ? 'favorite' : 'favorite_border'}</span>
+        </button>
         ${p.stock <= 5 ? `<span class="absolute top-3 left-3 bg-primary text-on-primary text-[10px] uppercase tracking-wider font-bold px-3 py-1 rounded-full">Only ${p.stock} left</span>` : ''}
       </div>
       <div class="p-4 md:p-6 flex flex-col flex-grow text-center">
@@ -356,6 +430,7 @@
   }
 
   function bindCardAddButtons(root) {
+    bindFavoriteButtons(root);
     (root || document).querySelectorAll('[data-add]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -408,6 +483,7 @@
         ? filtered.map(productCardHTML).join('')
         : `<div class="col-span-full text-center py-16 text-on-surface-variant"><span class="material-symbols-outlined text-4xl block mb-3 opacity-50">search_off</span>No products match your search.</div>`;
       bindCardAddButtons(grid);
+      bindFavoriteButtons(grid);
     }
     applyReveal();
   }
@@ -445,6 +521,9 @@
       { icon: 'water_drop', title: 'The Daily Ritual', text: 'Place away from direct sunlight, drafts, and ripening fruit. Mist the petals lightly each morning.' },
     ];
     const wrappingArr = Array.isArray(p.wrapping) ? p.wrapping : [];
+    const isBouquet = p.category === 'flowers' || p.category === 'wedding';
+    if (isBouquet && !detailState.opts.flowerColor) detailState.opts.flowerColor = FLOWER_COLORS[0];
+    if (isBouquet && !detailState.opts.coverColor) detailState.opts.coverColor = COVER_COLORS[0];
 
     root.innerHTML = `
       <a class="font-label text-label-sm text-on-surface-variant hover:text-primary transition mb-8 inline-flex items-center gap-2" href="shop.html">
@@ -487,6 +566,21 @@
                 </div>
               </div>`).join('')}
           </div>
+          ${isBouquet ? `
+          <div class="mb-6">
+            <label class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant mb-3 block">Flower Colour</label>
+            <div class="flex flex-wrap gap-2">
+              ${FLOWER_COLORS.map(c => `
+                <button type="button" class="px-3 py-2 rounded-lg text-sm border transition ${detailState.opts.flowerColor === c ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-low border-outline-variant/40'}" data-flower-color="${c}">${c}</button>`).join('')}
+            </div>
+          </div>
+          <div class="mb-6">
+            <label class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant mb-3 block">Cover / Wrapping Colour</label>
+            <div class="flex flex-wrap gap-2">
+              ${COVER_COLORS.map(c => `
+                <button type="button" class="px-3 py-2 rounded-lg text-sm border transition ${detailState.opts.coverColor === c ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-low border-outline-variant/40'}" data-cover-color="${c}">${c}</button>`).join('')}
+            </div>
+          </div>` : ''}
           ${wrappingArr.length ? `
           <div class="mb-6">
             <label class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant mb-3 block">Wrapping Style</label>
@@ -499,11 +593,12 @@
           </div>` : ''}
           ${p.card ? `
           <div class="mb-6">
-            <label class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant mb-3 block">Personal Card</label>
+            <label class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant mb-3 block">Message on Card</label>
             <button class="w-full text-left px-4 py-3 rounded-lg border transition ${detailState.opts.card ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-low border-outline-variant/40 text-on-surface hover:border-primary'}" id="cardToggle">
-              ${detailState.opts.card ? '✓ Card included' : 'Add a personal card'} <span class="opacity-70 text-xs ml-2">+${fmt(CARD_COST)}</span>
+              ${detailState.opts.card ? '✓ Card included' : 'Add a personal message card'} <span class="opacity-70 text-xs ml-2">+${fmt(CARD_COST)}</span>
             </button>
-            ${detailState.opts.card ? `<input class="w-full mt-3 bg-surface-container-low border border-outline-variant/40 rounded-lg p-3 focus:outline-none focus:border-primary" placeholder="Your message..." id="cardMsg" value="${detailState.opts.msg || ''}"/>` : ''}
+            ${detailState.opts.card ? `<textarea class="w-full mt-3 bg-surface-container-low border border-outline-variant/40 rounded-lg p-3 focus:outline-none focus:border-primary min-h-[88px] resize-y" placeholder="Write your message for the recipient..." id="cardMsg" maxlength="280">${detailState.opts.msg || ''}</textarea>
+            <p class="text-xs text-on-surface-variant mt-1">Printed on a premium card with your bouquet or gift.</p>` : ''}
           </div>` : ''}
           <div class="mb-8">
             <label class="font-label text-label-sm uppercase tracking-widest text-on-surface-variant mb-3 block">Quantity</label>
@@ -566,6 +661,8 @@
       </section>`;
 
     root.querySelectorAll('[data-gallery]').forEach(b => b.addEventListener('click', () => { detailState.gallery = parseInt(b.dataset.gallery, 10); renderDetail(p); }));
+    root.querySelectorAll('[data-flower-color]').forEach(b => b.addEventListener('click', () => { detailState.opts.flowerColor = b.dataset.flowerColor; renderDetail(p); }));
+    root.querySelectorAll('[data-cover-color]').forEach(b => b.addEventListener('click', () => { detailState.opts.coverColor = b.dataset.coverColor; renderDetail(p); }));
     root.querySelectorAll('[data-wrap]').forEach(b => b.addEventListener('click', () => { detailState.opts.wrap = b.dataset.wrap; renderDetail(p); }));
     root.querySelectorAll('[data-qty]').forEach(b => b.addEventListener('click', () => {
       const d = parseInt(b.dataset.qty, 10);
@@ -594,7 +691,7 @@
     const root = document.getElementById('detailContent');
     if (!root) return;
     root.innerHTML = loadingHTML('Loading product...');
-    detailState = { qty: 1, opts: {}, gallery: 0 };
+    detailState = { qty: 1, opts: { flowerColor: FLOWER_COLORS[0], coverColor: COVER_COLORS[0] }, gallery: 0 };
     const id = parseInt(new URLSearchParams(location.search).get('id'), 10);
     if (!id) { root.innerHTML = errorHTML('No product selected.'); return; }
     try {
@@ -634,7 +731,7 @@
               <img src="${item.image}" alt="${item.name}" class="w-16 h-16 md:w-20 md:h-20 rounded-lg object-cover flex-shrink-0"/>
               <div class="flex-1 min-w-0">
                 <h3 class="font-display text-base md:text-lg text-on-surface truncate">${item.name}</h3>
-                <p class="text-xs md:text-sm text-on-surface-variant">${item.opts.wrap || ''}${item.opts.card ? ' · With Card' : ''}</p>
+                <p class="text-xs md:text-sm text-on-surface-variant">${formatCartOpts(item.opts) || 'Standard'}</p>
                 <p class="md:hidden text-secondary font-semibold mt-1">${fmt(item.price * item.qty)}</p>
               </div>
               <div class="flex items-center gap-2">
@@ -871,8 +968,9 @@
   }
 
   // ─── PAGE: AUTH ───────────────────────────────────────────────
-  let authMode = 'login'; // 'login' | 'register' | 'verify'
+  let authMode = 'login'; // 'login' | 'register' | 'verify' | 'forgot' | 'reset'
   let pendingRegistration = null; // { name, email, password, sentAt }
+  let pendingReset = null; // { email }
   let resendTimer = null;
 
   function startResendCountdown(sec) {
@@ -910,6 +1008,74 @@
           <button class="w-full border border-outline-variant/40 text-on-surface-variant py-3 rounded-lg font-label text-label-sm hover:border-primary hover:text-primary transition" id="logoutBtn">Logout</button>
         </div>`;
       bindLogoutButtons();
+      applyReveal();
+      return;
+    }
+
+    if (authMode === 'forgot') {
+      el.innerHTML = `
+        <div class="max-w-md mx-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-8 md:p-10 reveal">
+          <button class="font-label text-label-sm text-on-surface-variant hover:text-primary transition mb-6 inline-flex items-center gap-2" id="backToLoginBtn">
+            <span class="material-symbols-outlined text-[18px]">arrow_back</span> Back to login
+          </button>
+          <span class="material-symbols-outlined text-5xl text-primary mb-4 block text-center">lock_reset</span>
+          <h2 class="font-display text-headline-md text-primary text-center mb-2">Forgot password?</h2>
+          <p class="text-center text-on-surface-variant mb-6">Enter your email and we'll send a 6-digit reset code.</p>
+          <input type="email" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg mb-4 focus:outline-none focus:border-primary" id="forgotEmail" placeholder="email@example.com" autocomplete="email"/>
+          <button class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="forgotSubmit">Send reset code</button>
+        </div>`;
+      document.getElementById('backToLoginBtn').addEventListener('click', () => { authMode = 'login'; renderAuth(); });
+      document.getElementById('forgotSubmit').addEventListener('click', async () => {
+        const email = document.getElementById('forgotEmail').value.trim();
+        if (!email) { toast('Enter your email'); return; }
+        const btn = document.getElementById('forgotSubmit');
+        btn.disabled = true; btn.textContent = 'Sending...';
+        try {
+          await Api.forgotPassword({ email });
+          pendingReset = { email };
+          authMode = 'reset';
+          renderAuth();
+          toast('If an account exists, we sent a reset code');
+        } catch (e) {
+          btn.disabled = false; btn.textContent = 'Send reset code';
+          toast(e.message || 'Could not send reset code');
+        }
+      });
+      applyReveal();
+      return;
+    }
+
+    if (authMode === 'reset' && pendingReset) {
+      el.innerHTML = `
+        <div class="max-w-md mx-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-8 md:p-10 reveal">
+          <span class="material-symbols-outlined text-5xl text-primary mb-4 block text-center">vpn_key</span>
+          <h2 class="font-display text-headline-md text-primary text-center mb-2">Set new password</h2>
+          <p class="text-center text-on-surface-variant mb-6">Code sent to <strong class="text-on-surface">${pendingReset.email}</strong></p>
+          <label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Reset Code</label>
+          <input class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg mb-4 text-center tracking-[0.4em] font-display text-xl" id="resetPin" placeholder="000000" inputmode="numeric" maxlength="6"/>
+          <label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">New Password</label>
+          <input type="password" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg mb-6 focus:outline-none focus:border-primary" id="resetPass" placeholder="Min. 6 characters" autocomplete="new-password"/>
+          <button class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="resetSubmit">Update password</button>
+        </div>`;
+      document.getElementById('resetPin').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); });
+      document.getElementById('resetSubmit').addEventListener('click', async () => {
+        const pin = document.getElementById('resetPin').value;
+        const password = document.getElementById('resetPass').value;
+        if (!/^\d{6}$/.test(pin)) { toast('Enter the 6-digit code'); return; }
+        if (password.length < 6) { toast('Password must be at least 6 characters'); return; }
+        const btn = document.getElementById('resetSubmit');
+        btn.disabled = true; btn.textContent = 'Updating...';
+        try {
+          await Api.resetPassword({ email: pendingReset.email, pin, password });
+          pendingReset = null;
+          authMode = 'login';
+          renderAuth();
+          toast('Password updated — please sign in');
+        } catch (e) {
+          btn.disabled = false; btn.textContent = 'Update password';
+          toast(e.message || 'Reset failed');
+        }
+      });
       applyReveal();
       return;
     }
@@ -992,8 +1158,11 @@
         <div class="mb-6"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Password</label><input type="password" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="aPass" placeholder="${authMode === 'register' ? 'Min. 6 characters' : 'Enter password'}" autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}"/></div>
         <button class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="authSubmit">${authMode === 'login' ? 'Sign In' : 'Send Verification Code'}</button>
         ${authMode === 'register' ? `<p class="text-center text-xs text-on-surface-variant mt-4">We'll email you a 6-digit code to verify your address.</p>` : ''}
+        ${authMode === 'login' ? `<p class="text-center text-sm mt-4"><button type="button" class="text-primary hover:underline font-label text-label-sm" id="forgotLink">Forgot password?</button></p>` : ''}
       </div>`;
     el.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => { authMode = b.dataset.mode; renderAuth(); }));
+    const forgotLink = document.getElementById('forgotLink');
+    if (forgotLink) forgotLink.addEventListener('click', () => { authMode = 'forgot'; renderAuth(); });
     const submit = document.getElementById('authSubmit');
     const handle = async () => {
       const email = document.getElementById('aEmail').value.trim();
@@ -1032,6 +1201,61 @@
   }
 
   function initAuth() { renderAuth(); }
+
+  function initContact() {
+    const el = document.getElementById('contactContent');
+    if (!el) return;
+    el.innerHTML = `
+      <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal">
+        <div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Your Name</label>
+        <input class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="cName" placeholder="Full name" autocomplete="name"/></div>
+        <div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Email</label>
+        <input type="email" class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="cEmail" placeholder="email@example.com" autocomplete="email"/></div>
+        <div class="mb-4"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Subject</label>
+        <input class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary" id="cSubject" placeholder="Order inquiry, custom bouquet…"/></div>
+        <div class="mb-6"><label class="font-label text-label-sm uppercase text-on-surface-variant block mb-2">Message</label>
+        <textarea class="w-full bg-surface-container-low border border-outline-variant/40 p-3 rounded-lg focus:outline-none focus:border-primary min-h-[140px] resize-y" id="cMessage" placeholder="How can we help?"></textarea></div>
+        <button class="w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="contactSubmit">Send message</button>
+      </div>`;
+    document.getElementById('contactSubmit').addEventListener('click', async () => {
+      const btn = document.getElementById('contactSubmit');
+      btn.disabled = true; btn.textContent = 'Sending...';
+      try {
+        const res = await Api.submitContact({
+          name: document.getElementById('cName').value.trim(),
+          email: document.getElementById('cEmail').value.trim(),
+          subject: document.getElementById('cSubject').value.trim(),
+          message: document.getElementById('cMessage').value.trim(),
+        });
+        el.innerHTML = `<div class="text-center py-12 reveal"><span class="material-symbols-outlined text-5xl text-primary mb-4">mark_email_read</span><p class="text-on-surface-variant">${res.message || 'Message sent!'}</p></div>`;
+        toast('Message sent');
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Send message';
+        toast(e.message || 'Could not send message');
+      }
+    });
+    applyReveal();
+  }
+
+  async function initFavorites() {
+    const el = document.getElementById('favoritesContent');
+    if (!el) return;
+    el.innerHTML = loadingHTML('Loading favourites...');
+    try {
+      await ensureProducts();
+      const list = products.filter(p => isFavorite(p.id));
+      if (!list.length) {
+        el.innerHTML = `<div class="text-center py-16 reveal"><span class="material-symbols-outlined text-6xl text-primary/30 mb-4">favorite</span><p class="text-on-surface-variant mb-6">No favourites yet — tap the heart on any product.</p><a href="shop.html" class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest">Browse shop</a></div>`;
+      } else {
+        el.innerHTML = `<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-gutter">${list.map(productCardHTML).join('')}</div>`;
+        bindCardAddButtons(el);
+        bindFavoriteButtons(el);
+      }
+    } catch (e) {
+      el.innerHTML = errorHTML(e.message);
+    }
+    applyReveal();
+  }
 
   // ─── PAGE: ORDERS ─────────────────────────────────────────────
   async function initOrders() {
@@ -1293,6 +1517,7 @@
     setupDrawer();
     bindLogoutButtons();
     updateCartBadge();
+    updateFavoritesBadge();
     applyReveal();
 
     // 2. Refresh session in the background. If the cached user turns out to
@@ -1306,12 +1531,13 @@
         setupDrawer();
         bindLogoutButtons();
         updateCartBadge();
+        updateFavoritesBadge();
       }
     }).catch(() => {});
 
     // 3. Initialize the current page in parallel with the session refresh.
     const page = document.body.dataset.page;
-    const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin }[page];
+    const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites }[page];
     if (init) {
       try { await init(); }
       catch (e) { console.error(e); toast(e.message || 'Page error'); }

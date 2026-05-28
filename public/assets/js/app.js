@@ -142,9 +142,21 @@
 
   function profileNavDesktop(activePage) {
     if (!currentUser) return '';
+    const isAdmin = currentUser.role === 'admin';
     const initials = userInitials(currentUser.name);
-    const profileActive = activePage === 'profile' || activePage === 'orders';
+    const profileActive = isAdmin ? activePage === 'admin' : (activePage === 'profile' || activePage === 'orders');
     const icon = (name) => `<span class="material-symbols-outlined text-[20px] text-on-surface-variant">${name}</span>`;
+    const menuItems = isAdmin
+      ? `${profileMenuLink('admin.html', icon('dashboard'), 'Admin dashboard')}
+              <div class="border-t border-outline-variant/20 mt-1 pt-1">
+                ${profileMenuLink('#', icon('logout'), 'Logout', { button: true, danger: true, attrs: 'data-logout id="navLogoutBtn"' })}
+              </div>`
+      : `${profileMenuLink('profile.html', icon('person'), 'My profile')}
+              ${profileMenuLink('orders.html', icon('inventory_2'), 'My orders')}
+              ${profileMenuLink('profile.html#password', icon('lock_reset'), 'Change password')}
+              <div class="border-t border-outline-variant/20 mt-1 pt-1">
+                ${profileMenuLink('#', icon('logout'), 'Sign out', { button: true, danger: true, attrs: 'data-logout id="navLogoutBtn"' })}
+              </div>`;
     return `
           <div class="relative profile-menu">
             <button type="button" id="profileMenuBtn" aria-expanded="false" aria-haspopup="menu"
@@ -158,21 +170,23 @@
                 <p class="font-display text-base text-primary truncate">${currentUser.name}</p>
                 <p class="text-xs text-on-surface-variant truncate mt-0.5">${currentUser.email}</p>
               </div>
-              ${profileMenuLink('profile.html', icon('person'), 'My profile')}
-              ${profileMenuLink('orders.html', icon('inventory_2'), 'My orders')}
-              ${profileMenuLink('profile.html#password', icon('lock_reset'), 'Change password')}
-              ${currentUser.role === 'admin' ? profileMenuLink('admin.html', icon('dashboard'), 'Admin dashboard') : ''}
-              <div class="border-t border-outline-variant/20 mt-1 pt-1">
-                ${profileMenuLink('#', icon('logout'), 'Sign out', { button: true, danger: true, attrs: 'data-logout id="navLogoutBtn"' })}
-              </div>
+              ${menuItems}
             </div>
           </div>`;
   }
 
   function profileNavDrawer(activePage) {
     if (!currentUser) return '';
+    const isAdmin = currentUser.role === 'admin';
     const initials = userInitials(currentUser.name);
     const icon = (name) => `<span class="material-symbols-outlined text-[22px]">${name}</span>`;
+    const drawerLinks = isAdmin
+      ? `<a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='admin'?'is-active':''}" href="admin.html">${icon('dashboard')} Admin dashboard</a>
+          <button type="button" class="drawer-link flex items-center gap-3 w-full text-left px-4 py-3 rounded-lg font-body text-base text-error hover:bg-error/5 transition mt-1" data-logout id="logoutDrawerBtn">${icon('logout')} Logout</button>`
+      : `<a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='profile'?'is-active':''}" href="profile.html">${icon('person')} My profile</a>
+          <a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='orders'?'is-active':''}" href="orders.html">${icon('inventory_2')} My orders</a>
+          <a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition" href="profile.html#password">${icon('lock_reset')} Change password</a>
+          <button type="button" class="drawer-link flex items-center gap-3 w-full text-left px-4 py-3 rounded-lg font-body text-base text-error hover:bg-error/5 transition mt-1" data-logout id="logoutDrawerBtn">${icon('logout')} Sign out</button>`;
     return `
         <div class="mt-4 pt-4 border-t border-outline-variant/30">
           <div class="flex items-center gap-3 px-4 py-3 mb-2">
@@ -182,11 +196,7 @@
               <p class="text-xs text-on-surface-variant truncate">${currentUser.email}</p>
             </div>
           </div>
-          <a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='profile'?'is-active':''}" href="profile.html">${icon('person')} My profile</a>
-          <a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='orders'?'is-active':''}" href="orders.html">${icon('inventory_2')} My orders</a>
-          <a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition" href="profile.html#password">${icon('lock_reset')} Change password</a>
-          ${currentUser.role === 'admin' ? `<a class="drawer-link flex items-center gap-3 px-4 py-3 rounded-lg font-body text-base text-on-surface hover:bg-surface-container-low transition ${activePage==='admin'?'is-active':''}" href="admin.html">${icon('dashboard')} Admin</a>` : ''}
-          <button type="button" class="drawer-link flex items-center gap-3 w-full text-left px-4 py-3 rounded-lg font-body text-base text-error hover:bg-error/5 transition mt-1" data-logout id="logoutDrawerBtn">${icon('logout')} Sign out</button>
+          ${drawerLinks}
         </div>`;
   }
 
@@ -1108,7 +1118,7 @@
     if (!el) return;
     clearInterval(resendTimer);
     if (currentUser) {
-      location.replace('profile.html');
+      location.replace(currentUser.role === 'admin' ? 'admin.html' : 'profile.html');
       return;
     }
 
@@ -1387,6 +1397,11 @@
       return;
     }
 
+    if (currentUser.role === 'admin') {
+      location.replace('admin.html');
+      return;
+    }
+
     const initials = userInitials(currentUser.name);
     profilePasswordStep = location.hash === '#password' ? 'idle' : profilePasswordStep;
 
@@ -1397,7 +1412,6 @@
           <div class="min-w-0">
             <h2 class="font-display text-headline-md text-primary truncate">${currentUser.name}</h2>
             <p class="text-on-surface-variant truncate">${currentUser.email}</p>
-            ${currentUser.role === 'admin' ? '<span class="inline-block mt-2 font-label text-[10px] uppercase tracking-widest bg-secondary/15 text-secondary px-2 py-1 rounded-full">Administrator</span>' : ''}
           </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 reveal">
@@ -1406,17 +1420,11 @@
             <h3 class="font-display text-lg text-on-surface group-hover:text-primary transition">My orders</h3>
             <p class="text-sm text-on-surface-variant mt-1">Track purchases &amp; delivery status</p>
           </a>
-          ${currentUser.role === 'admin' ? `
-          <a href="admin.html" class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-5 hover:border-primary/40 hover:shadow-md transition group">
-            <span class="material-symbols-outlined text-secondary text-3xl mb-3 block">dashboard</span>
-            <h3 class="font-display text-lg text-on-surface group-hover:text-primary transition">Admin dashboard</h3>
-            <p class="text-sm text-on-surface-variant mt-1">Manage shop &amp; reservations</p>
-          </a>` : `
           <a href="favorites.html" class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-5 hover:border-primary/40 hover:shadow-md transition group">
             <span class="material-symbols-outlined text-primary text-3xl mb-3 block">favorite</span>
             <h3 class="font-display text-lg text-on-surface group-hover:text-primary transition">Favourites</h3>
             <p class="text-sm text-on-surface-variant mt-1">Saved bouquets &amp; gifts</p>
-          </a>`}
+          </a>
         </div>
         <div id="password" class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 md:p-8 reveal scroll-mt-28">
           <div class="flex items-center gap-3 mb-4">

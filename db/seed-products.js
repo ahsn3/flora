@@ -5,6 +5,10 @@
 const img = (slug) => `/assets/products/${slug}.jpg`;
 const gl = (...slugs) => slugs.map(img);
 const rr = (color) => `/assets/products/romantic-rose-bouquet/${color}.jpg`;
+const sf = (color) => `/assets/products/spring-wildflowers/${color}.png`;
+const oe = (color) => `/assets/products/orchid-elegance/${color}.png`;
+const ss = (color) => `/assets/products/sunflower-sunshine/${color}.png`;
+const choco = () => '/assets/products/chocolate-and-roses/chocolate-and-roses.png';
 
 module.exports = [
   {
@@ -31,8 +35,15 @@ module.exports = [
     tagline: 'Pastel Harmony & Light',
     category: 'flowers',
     price: 1200,
-    image: img('spring-wildflowers'),
-    gallery: gl('spring-wildflowers', 'hydrangea-cloud', 'peony-blush-garden', 'citrus-and-bloom'),
+    image: sf('lavender'),
+    gallery: [
+      sf('classic-red'),
+      sf('soft-pink'),
+      sf('pure-white'),
+      sf('lavender'),
+      sf('sunshine-yellow'),
+      sf('seasonal-mix'),
+    ],
     desc: "A vibrant mix of seasonal wildflowers — tulips, daisies, ranunculus, and baby's breath — capturing the spirit of spring.",
     wrapping: ['Natural Twine', 'Pastel Ribbon', 'No Wrapping'],
     card: true,
@@ -43,8 +54,15 @@ module.exports = [
     tagline: 'Deep Burgundy Majesty',
     category: 'flowers',
     price: 2200,
-    image: img('orchid-elegance'),
-    gallery: gl('orchid-elegance', 'orchid-elegance-2', 'orchid-elegance-3', 'orchid-elegance-4'),
+    image: oe('pure-white'),
+    gallery: [
+      oe('classic-red'),
+      oe('soft-pink'),
+      oe('pure-white'),
+      oe('lavender'),
+      oe('sunshine-yellow'),
+      oe('seasonal-mix'),
+    ],
     desc: 'Hand-selected orchids with depth of color and structural perfection.',
     wrapping: ['Gift Box', 'Open Vase', 'Ribbon Only'],
     card: true,
@@ -63,8 +81,15 @@ module.exports = [
     tagline: 'Radiant Golden Fields',
     category: 'flowers',
     price: 950,
-    image: img('sunflower-sunshine'),
-    gallery: gl('sunflower-sunshine', 'citrus-and-bloom', 'birthday-bloom-box'),
+    image: ss('sunshine-yellow'),
+    gallery: [
+      ss('classic-red'),
+      ss('soft-pink'),
+      ss('pure-white'),
+      ss('lavender'),
+      ss('sunshine-yellow'),
+      ss('seasonal-mix'),
+    ],
     desc: 'Bright sunflowers with eucalyptus and cream chamomile.',
     wrapping: ['Burlap Wrap', 'Yellow Ribbon', 'No Wrapping'],
     card: true,
@@ -87,8 +112,8 @@ module.exports = [
     tagline: 'Sweet Romance',
     category: 'gifts',
     price: 1800,
-    image: img('chocolate-and-roses'),
-    gallery: gl('chocolate-and-roses', 'romantic-rose-bouquet', 'velvet-jewelry-box-rose', 'rose-gold-anniversary'),
+    image: choco(),
+    gallery: [choco()],
     desc: 'Red roses with handcrafted Belgian chocolates in a velvet-lined box.',
     wrapping: ['Red Velvet Box', 'Gold Ribbon Box', 'Simple Wrap'],
     card: true,

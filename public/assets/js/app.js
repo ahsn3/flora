@@ -12,6 +12,12 @@
   const categories = ['all','flowers','gifts','wedding'];
   const COVER_COLORS = ['Burgundy', 'Blush Pink', 'Ivory Cream', 'Sage Green', 'Midnight Navy'];
   const FLOWER_COLORS = ['Classic Red', 'Soft Pink', 'Pure White', 'Lavender', 'Sunshine Yellow', 'Seasonal Mix'];
+  const PRODUCT_DEFAULT_FLOWER_COLOR = {
+    'Romantic Rose Bouquet': 'Classic Red',
+    'Spring Wildflowers': 'Lavender',
+    'Orchid Elegance': 'Pure White',
+    'Sunflower Sunshine': 'Sunshine Yellow',
+  };
 
   function productThumbUrl(url) {
     if (!url || url.includes('/thumbs/')) return url || '';
@@ -1049,6 +1055,8 @@
         root.innerHTML = `<div class="text-center py-16"><p class="text-on-surface-variant mb-4">Product not found.</p><a class="bg-primary text-on-primary px-6 py-3 rounded-full font-label text-label-sm uppercase tracking-widest" href="shop.html">Browse Collection</a></div>`;
         return;
       }
+      const defaultFlower = PRODUCT_DEFAULT_FLOWER_COLOR[p.name] || FLOWER_COLORS[0];
+      detailState.opts.flowerColor = defaultFlower;
       renderDetail(p);
     } catch (e) {
       root.innerHTML = errorHTML(e.message);

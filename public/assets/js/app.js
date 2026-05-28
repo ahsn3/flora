@@ -13,6 +13,16 @@
   const COVER_COLORS = ['Burgundy', 'Blush Pink', 'Ivory Cream', 'Sage Green', 'Midnight Navy'];
   const FLOWER_COLORS = ['Classic Red', 'Soft Pink', 'Pure White', 'Lavender', 'Sunshine Yellow', 'Seasonal Mix'];
 
+  function productThumbUrl(url) {
+    if (!url || url.includes('/thumbs/')) return url || '';
+    return url.replace('/assets/products/', '/assets/products/thumbs/');
+  }
+
+  function productGallery(p) {
+    if (p.gallery && p.gallery.length) return p.gallery;
+    return p.image ? [p.image] : [];
+  }
+
   const STORE_INFO = {
     name: 'Flora & Gifts Atelier',
     address: 'Teşvikiye Cad. No: 42, Nişantaşı',
@@ -43,6 +53,8 @@
 
   let cart = Store.get('cart', []);
   let favorites = Store.get('favorites', []);
+  favorites = favorites.map((id) => Number(id)).filter((id) => !Number.isNaN(id));
+  Store.set('favorites', favorites);
   let token = Store.get('token', null);
   let currentUser = Store.get('user', null);
   let products = [];
@@ -438,22 +450,37 @@
   }
 
   function isFavorite(id) {
-    return favorites.includes(Number(id));
+    const n = Number(id);
+    return favorites.some((f) => Number(f) === n);
+  }
+
+  function setFavoriteButtonState(btn, on) {
+    const icon = btn.querySelector('.fav-icon');
+    if (icon) {
+      icon.textContent = on ? 'favorite' : 'favorite_border';
+      icon.classList.toggle('is-active', on);
+    }
+    btn.classList.toggle('text-error', on);
+    btn.classList.toggle('text-on-surface-variant', !on);
+    btn.classList.toggle('hover:text-error', !on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.setAttribute('aria-label', on ? 'Remove from favourites' : 'Add to favourites');
+  }
+
+  function syncFavoriteIcons(root) {
+    (root || document).querySelectorAll('[data-fav]').forEach((btn) => {
+      setFavoriteButtonState(btn, isFavorite(btn.dataset.fav));
+    });
   }
 
   function toggleFavorite(id) {
     const n = Number(id);
-    const i = favorites.indexOf(n);
+    const i = favorites.findIndex((f) => Number(f) === n);
     if (i >= 0) favorites.splice(i, 1);
     else favorites.push(n);
     Store.set('favorites', favorites);
     updateFavoritesBadge();
-    document.querySelectorAll('[data-fav="' + n + '"]').forEach(btn => {
-      const on = isFavorite(n);
-      const icon = btn.querySelector('.material-symbols-outlined');
-      if (icon) icon.textContent = on ? 'favorite' : 'favorite_border';
-      btn.classList.toggle('text-error', on);
-    });
+    document.querySelectorAll('[data-fav="' + n + '"]').forEach((btn) => setFavoriteButtonState(btn, isFavorite(n)));
     toast(i >= 0 ? 'Removed from favourites' : 'Saved to favourites');
   }
 
@@ -472,7 +499,8 @@
   }
 
   function bindFavoriteButtons(root) {
-    (root || document).querySelectorAll('[data-fav]').forEach(btn => {
+    const scope = root || document;
+    scope.querySelectorAll('[data-fav]').forEach(btn => {
       if (btn._favBound) return;
       btn._favBound = true;
       btn.addEventListener('click', (e) => {
@@ -481,6 +509,7 @@
         toggleFavorite(parseInt(btn.dataset.fav, 10));
       });
     });
+    syncFavoriteIcons(scope);
   }
 
   function loadingHTML(label) {
@@ -530,12 +559,14 @@
 
   // ─── PRODUCT CARD ─────────────────────────────────────────────
   function productCardHTML(p) {
+    const full = p.image || '';
+    const thumb = productThumbUrl(full);
     return `
     <a href="product.html?id=${p.id}" class="product-card group bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-500 flex flex-col h-full border border-outline-variant/10 cursor-pointer reveal block">
       <div class="aspect-[4/5] overflow-hidden bg-surface-container-low relative">
-        <img alt="${p.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src="${p.image}" loading="lazy"/>
-        <button type="button" class="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-surface/90 backdrop-blur flex items-center justify-center shadow ${isFavorite(p.id) ? 'text-error' : 'text-on-surface-variant hover:text-error'}" data-fav="${p.id}" aria-label="Toggle favourite">
-          <span class="material-symbols-outlined text-[22px]">${isFavorite(p.id) ? 'favorite' : 'favorite_border'}</span>
+        <img alt="${p.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src="${thumb}" srcset="${thumb} 420w, ${full} 900w" sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw" width="400" height="500" loading="lazy" decoding="async"/>
+        <button type="button" class="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-surface/90 backdrop-blur flex items-center justify-center shadow ${isFavorite(p.id) ? 'text-error' : 'text-on-surface-variant hover:text-error'}" data-fav="${p.id}" aria-pressed="${isFavorite(p.id) ? 'true' : 'false'}" aria-label="${isFavorite(p.id) ? 'Remove from favourites' : 'Add to favourites'}">
+          <span class="material-symbols-outlined fav-icon text-[22px] ${isFavorite(p.id) ? 'is-active' : ''}">${isFavorite(p.id) ? 'favorite' : 'favorite_border'}</span>
         </button>
         ${p.stock <= 5 ? `<span class="absolute top-3 left-3 bg-primary text-on-primary text-[10px] uppercase tracking-wider font-bold px-3 py-1 rounded-full">Only ${p.stock} left</span>` : ''}
       </div>
@@ -630,8 +661,20 @@
     if (!root) return;
     document.title = `${p.name} | Flora & Gifts`;
     const total = calcPrice(p, detailState.opts) * detailState.qty;
-    const gallery = (p.gallery && p.gallery.length) ? p.gallery : [p.image];
+    const gallery = productGallery(p);
     const heroImg = gallery[detailState.gallery] || p.image;
+    const heroIdx = Math.min(detailState.gallery, gallery.length - 1);
+    if (heroIdx !== detailState.gallery) detailState.gallery = heroIdx;
+
+    let preload = document.getElementById('detailImgPreload');
+    if (!preload) {
+      preload = document.createElement('link');
+      preload.id = 'detailImgPreload';
+      preload.rel = 'preload';
+      preload.as = 'image';
+      document.head.appendChild(preload);
+    }
+    preload.href = heroImg;
     const attrs = p.attributes || [
       { icon: 'local_florist',  label: 'Freshness', value: 'Crafted Today' },
       { icon: 'workspace_premium', label: 'Quality', value: 'Hand-Selected' },
@@ -652,17 +695,13 @@
       <section class="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start mb-16 md:mb-24">
         <div class="lg:col-span-7 flex flex-col gap-4 md:gap-6 reveal">
           <div class="aspect-square bg-surface-container overflow-hidden rounded-xl shadow-sm shadow-primary/5">
-            <img alt="${p.name}" class="w-full h-full object-cover transition-opacity duration-500" src="${heroImg}"/>
+            <img alt="${p.name}" id="detailHeroImg" class="w-full h-full object-cover transition-opacity duration-300" src="${heroImg}" width="900" height="900" fetchpriority="high" decoding="async"/>
           </div>
-          <div class="grid grid-cols-4 gap-3 md:gap-4">
-            ${gallery.slice(0, 4).map((src, i) => `
-              <button class="aspect-square bg-surface-container rounded-md overflow-hidden cursor-pointer transition-all ${detailState.gallery === i ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-primary/40'}" data-gallery="${i}">
-                <img alt="${p.name} thumbnail ${i+1}" class="w-full h-full object-cover" src="${src}"/>
+          <div class="flex gap-3 md:gap-4 overflow-x-auto pb-1 snap-x snap-mandatory">
+            ${gallery.map((src, i) => `
+              <button type="button" class="snap-start shrink-0 w-[22%] min-w-[4.5rem] max-w-[7rem] aspect-square bg-surface-container rounded-md overflow-hidden cursor-pointer transition-all ${detailState.gallery === i ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-primary/40'}" data-gallery="${i}" aria-label="View photo ${i + 1}">
+                <img alt="${p.name} — colour variant ${i + 1}" class="w-full h-full object-cover" src="${productThumbUrl(src)}" width="120" height="120" loading="lazy" decoding="async"/>
               </button>`).join('')}
-            ${gallery.length < 4 ? Array.from({ length: 4 - gallery.length }).map(() => `
-              <div class="aspect-square bg-surface-container rounded-md overflow-hidden flex items-center justify-center opacity-50">
-                <span class="material-symbols-outlined text-primary/40">image</span>
-              </div>`).join('') : ''}
           </div>
         </div>
         <div class="lg:col-span-5 lg:sticky lg:top-32 reveal">
@@ -780,7 +819,24 @@
         </div>
       </section>`;
 
-    root.querySelectorAll('[data-gallery]').forEach(b => b.addEventListener('click', () => { detailState.gallery = parseInt(b.dataset.gallery, 10); renderDetail(p); }));
+    root.querySelectorAll('[data-gallery]').forEach(b => b.addEventListener('click', () => {
+      const idx = parseInt(b.dataset.gallery, 10);
+      if (idx === detailState.gallery) return;
+      detailState.gallery = idx;
+      const src = gallery[idx];
+      const hero = document.getElementById('detailHeroImg');
+      if (hero && src) {
+        hero.style.opacity = '0.5';
+        const preload = new Image();
+        preload.onload = () => { hero.src = src; hero.style.opacity = '1'; };
+        preload.src = src;
+      }
+      root.querySelectorAll('[data-gallery]').forEach(btn => {
+        const i = parseInt(btn.dataset.gallery, 10);
+        const on = i === idx;
+        btn.className = `snap-start shrink-0 w-[22%] min-w-[4.5rem] max-w-[7rem] aspect-square bg-surface-container rounded-md overflow-hidden cursor-pointer transition-all ${on ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-primary/40'}`;
+      });
+    }));
     root.querySelectorAll('[data-flower-color]').forEach(b => b.addEventListener('click', () => { detailState.opts.flowerColor = b.dataset.flowerColor; renderDetail(p); }));
     root.querySelectorAll('[data-cover-color]').forEach(b => b.addEventListener('click', () => { detailState.opts.coverColor = b.dataset.coverColor; renderDetail(p); }));
     root.querySelectorAll('[data-wrap]').forEach(b => b.addEventListener('click', () => { detailState.opts.wrap = b.dataset.wrap; renderDetail(p); }));
@@ -848,7 +904,7 @@
         <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 overflow-hidden reveal">
           ${cart.map((item, idx) => `
             <div class="flex items-center gap-4 p-4 md:p-6 border-b border-outline-variant/30 last:border-b-0">
-              <img src="${item.image}" alt="${item.name}" class="w-16 h-16 md:w-20 md:h-20 rounded-lg object-cover flex-shrink-0"/>
+              <img src="${productThumbUrl(item.image)}" alt="${item.name}" class="w-16 h-16 md:w-20 md:h-20 rounded-lg object-cover flex-shrink-0" loading="lazy" decoding="async" width="80" height="80"/>
               <div class="flex-1 min-w-0">
                 <h3 class="font-display text-base md:text-lg text-on-surface truncate">${item.name}</h3>
                 <p class="text-xs md:text-sm text-on-surface-variant">${formatCartOpts(item.opts) || 'Standard'}</p>
@@ -1640,7 +1696,7 @@
             </div>
             <button class="mt-4 bg-primary text-on-primary px-6 py-3 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition" id="addProductBtn">Add Product</button>
           </div>
-          <div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['','Name','Category','Price','Stock','Action'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${products.map(p => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3"><img src="${p.image}" class="w-10 h-10 rounded-lg object-cover"/></td><td class="px-4 py-3">${p.name}</td><td class="px-4 py-3 capitalize">${p.category}</td><td class="px-4 py-3 text-secondary">${fmt(p.price)}</td><td class="px-4 py-3">${p.stock}</td><td class="px-4 py-3"><button class="text-error text-xs hover:underline" data-del="${p.id}">Remove</button></td></tr>`).join('')}</tbody></table></div>`;
+          <div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['','Name','Category','Price','Stock','Action'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${products.map(p => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3"><img src="${productThumbUrl(p.image)}" class="w-10 h-10 rounded-lg object-cover" loading="lazy" decoding="async" width="40" height="40"/></td><td class="px-4 py-3">${p.name}</td><td class="px-4 py-3 capitalize">${p.category}</td><td class="px-4 py-3 text-secondary">${fmt(p.price)}</td><td class="px-4 py-3">${p.stock}</td><td class="px-4 py-3"><button class="text-error text-xs hover:underline" data-del="${p.id}">Remove</button></td></tr>`).join('')}</tbody></table></div>`;
         document.getElementById('addProductBtn').addEventListener('click', async () => {
           const name = document.getElementById('apName').value.trim();
           const price = parseInt(document.getElementById('apPrice').value, 10);
@@ -1799,6 +1855,7 @@
     bindLogoutButtons();
     updateCartBadge();
     updateFavoritesBadge();
+    syncFavoriteIcons();
     applyReveal();
 
     // 2. Refresh session in the background. If the cached user turns out to

@@ -15,12 +15,173 @@
 
   function productThumbUrl(url) {
     if (!url || url.includes('/thumbs/')) return url || '';
-    return url.replace('/assets/products/', '/assets/products/thumbs/');
+    const prefix = '/assets/products/';
+    if (!url.includes(prefix)) return url;
+    const rest = url.slice(prefix.length);
+    if (rest.includes('/')) {
+      const slash = rest.lastIndexOf('/');
+      const dir = rest.slice(0, slash);
+      const file = rest.slice(slash + 1);
+      return `${prefix}${dir}/thumbs/${file}`;
+    }
+    return url.replace(prefix, `${prefix}thumbs/`);
   }
 
   function productGallery(p) {
     if (p.gallery && p.gallery.length) return p.gallery;
     return p.image ? [p.image] : [];
+  }
+
+  /** Filename keys for per-colour product photos (e.g. romantic-rose-bouquet/classic-red.jpg) */
+  const FLOWER_COLOR_FILE = {
+    'Classic Red': 'classic-red',
+    'Soft Pink': 'soft-pink',
+    'Pure White': 'pure-white',
+    'Lavender': 'lavender',
+    'Sunshine Yellow': 'sunshine-yellow',
+    'Seasonal Mix': 'seasonal-mix',
+  };
+
+  const COVER_TO_FLOWER_FILE = {
+    'Burgundy': 'classic-red',
+    'Blush Pink': 'soft-pink',
+    'Ivory Cream': 'pure-white',
+    'Sage Green': 'seasonal-mix',
+    'Midnight Navy': 'lavender',
+  };
+
+  function galleryIndexForColorFile(gallery, fileKey) {
+    if (!fileKey || !gallery.length) return -1;
+    const needle = `/${fileKey}.`;
+    return gallery.findIndex((url) => url.toLowerCase().includes(needle));
+  }
+
+  function flowerColorForImage(src) {
+    if (!src) return null;
+    for (const [name, key] of Object.entries(FLOWER_COLOR_FILE)) {
+      if (src.includes(`/${key}.`)) return name;
+    }
+    return null;
+  }
+
+  /** Slug fragments used to pick the best gallery photo for a colour option */
+  const FLOWER_COLOR_SLUGS = {
+    'Classic Red': ['romantic-rose-bouquet', 'velvet-jewelry-box-rose', 'chocolate-and-roses'],
+    'Soft Pink': ['peony-blush-garden', 'rose-gold-anniversary', 'birthday-bloom-box', 'bridal-bouquet'],
+    'Pure White': ['sympathy-white-lilies', 'wedding-centerpiece', 'bridal-bouquet', 'ceremony-aisle-petals'],
+    'Lavender': ['lavender-dreams', 'orchid-elegance', 'midnight-tulip-trio'],
+    'Sunshine Yellow': ['sunflower-sunshine', 'citrus-and-bloom'],
+    'Seasonal Mix': ['spring-wildflowers', 'hydrangea-cloud', 'garden-party-centerpiece', 'artisan-tea-and-bloom'],
+  };
+
+  const COVER_COLOR_SLUGS = {
+    'Burgundy': ['romantic-rose-bouquet', 'orchid-elegance', 'velvet-jewelry-box-rose', 'chocolate-and-roses'],
+    'Blush Pink': ['peony-blush-garden', 'rose-gold-anniversary', 'birthday-bloom-box'],
+    'Ivory Cream': ['wedding-centerpiece', 'sympathy-white-lilies', 'ceremony-aisle-petals', 'bridal-bouquet'],
+    'Sage Green': ['spring-wildflowers', 'mini-succulent-grove', 'terra-ceramic-vase', 'hydrangea-cloud'],
+    'Midnight Navy': ['orchid-elegance-2', 'midnight-tulip-trio', 'lavender-dreams', 'orchid-elegance'],
+  };
+
+  const FLOWER_COLOR_FALLBACK = {
+    'Classic Red': '/assets/products/romantic-rose-bouquet/classic-red.jpg',
+    'Soft Pink': '/assets/products/romantic-rose-bouquet/soft-pink.jpg',
+    'Pure White': '/assets/products/romantic-rose-bouquet/pure-white.jpg',
+    'Lavender': '/assets/products/romantic-rose-bouquet/lavender.jpg',
+    'Sunshine Yellow': '/assets/products/romantic-rose-bouquet/sunshine-yellow.jpg',
+    'Seasonal Mix': '/assets/products/romantic-rose-bouquet/seasonal-mix.jpg',
+  };
+
+  const COVER_COLOR_FALLBACK = {
+    'Burgundy': '/assets/products/romantic-rose-bouquet/classic-red.jpg',
+    'Blush Pink': '/assets/products/romantic-rose-bouquet/soft-pink.jpg',
+    'Ivory Cream': '/assets/products/romantic-rose-bouquet/pure-white.jpg',
+    'Sage Green': '/assets/products/romantic-rose-bouquet/seasonal-mix.jpg',
+    'Midnight Navy': '/assets/products/romantic-rose-bouquet/lavender.jpg',
+  };
+
+  function galleryIndexForSlugs(gallery, slugs) {
+    if (!gallery.length || !slugs?.length) return -1;
+    for (let i = 0; i < gallery.length; i++) {
+      const path = gallery[i].toLowerCase();
+      if (slugs.some((s) => path.includes(s))) return i;
+    }
+    return -1;
+  }
+
+  function galleryIndexForFlowerColor(gallery, flowerColor) {
+    const fileIdx = galleryIndexForColorFile(gallery, FLOWER_COLOR_FILE[flowerColor]);
+    if (fileIdx >= 0) return fileIdx;
+    const idx = galleryIndexForSlugs(gallery, FLOWER_COLOR_SLUGS[flowerColor]);
+    if (idx >= 0) return idx;
+    const fi = FLOWER_COLORS.indexOf(flowerColor);
+    return fi >= 0 ? fi % gallery.length : 0;
+  }
+
+  function galleryIndexForCoverColor(gallery, coverColor) {
+    const fileIdx = galleryIndexForColorFile(gallery, COVER_TO_FLOWER_FILE[coverColor]);
+    if (fileIdx >= 0) return fileIdx;
+    const idx = galleryIndexForSlugs(gallery, COVER_COLOR_SLUGS[coverColor]);
+    if (idx >= 0) return idx;
+    const ci = COVER_COLORS.indexOf(coverColor);
+    return ci >= 0 ? ci % gallery.length : 0;
+  }
+
+  function resolveDetailImage(gallery, productImage) {
+    const flower = detailState.opts.flowerColor;
+    const cover = detailState.opts.coverColor;
+    if (flower) {
+      const matched = galleryIndexForFlowerColor(gallery, flower);
+      if (gallery[matched]) return { src: gallery[matched], index: matched };
+      if (FLOWER_COLOR_FALLBACK[flower]) return { src: FLOWER_COLOR_FALLBACK[flower], index: -1 };
+    }
+    if (cover) {
+      const matched = galleryIndexForCoverColor(gallery, cover);
+      if (gallery[matched]) return { src: gallery[matched], index: matched };
+      if (COVER_COLOR_FALLBACK[cover]) return { src: COVER_COLOR_FALLBACK[cover], index: -1 };
+    }
+    const idx = Math.min(Math.max(0, detailState.gallery), gallery.length - 1);
+    return { src: gallery[idx] || productImage, index: idx };
+  }
+
+  function syncDetailGalleryToOptions(gallery, productImage) {
+    const { src, index } = resolveDetailImage(gallery, productImage);
+    detailState._heroSrc = src;
+    if (index >= 0) detailState.gallery = index;
+    else detailState.gallery = -1;
+  }
+
+  function setDetailHeroImage(src, root) {
+    const hero = document.getElementById('detailHeroImg');
+    if (!hero || !src) return;
+    hero.style.opacity = '0.5';
+    const preload = new Image();
+    preload.onload = () => { hero.src = src; hero.style.opacity = '1'; };
+    preload.src = src;
+    const link = document.getElementById('detailImgPreload');
+    if (link) link.href = src;
+    (root || document).querySelectorAll('[data-gallery]').forEach((btn) => {
+      const i = parseInt(btn.dataset.gallery, 10);
+      const on = detailState.gallery >= 0 && i === detailState.gallery;
+      const frame = btn.querySelector('span.aspect-square') || btn;
+      frame.className = `aspect-square bg-surface-container rounded-md overflow-hidden transition-all ${on ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-primary/40'}`;
+    });
+  }
+
+  function updateDetailColorButtons(root) {
+    root.querySelectorAll('[data-flower-color]').forEach((btn) => {
+      const on = btn.dataset.flowerColor === detailState.opts.flowerColor;
+      btn.className = `px-3 py-2 rounded-lg text-sm border transition ${on ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-low border-outline-variant/40'}`;
+    });
+    root.querySelectorAll('[data-cover-color]').forEach((btn) => {
+      const on = btn.dataset.coverColor === detailState.opts.coverColor;
+      btn.className = `px-3 py-2 rounded-lg text-sm border transition ${on ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-low border-outline-variant/40'}`;
+    });
+  }
+
+  function applyDetailColorPhoto(gallery, productImage, root) {
+    syncDetailGalleryToOptions(gallery, productImage);
+    setDetailHeroImage(detailState._heroSrc || gallery[0] || productImage, root);
+    updateDetailColorButtons(root);
   }
 
   const STORE_INFO = {
@@ -654,7 +815,7 @@
   }
 
   // ─── PAGE: PRODUCT DETAIL ─────────────────────────────────────
-  let detailState = { qty: 1, opts: {}, gallery: 0 };
+  let detailState = { qty: 1, opts: {}, gallery: 0, galleryLocked: false, _initialized: false };
 
   function renderDetail(p) {
     const root = document.getElementById('detailContent');
@@ -662,9 +823,16 @@
     document.title = `${p.name} | Flora & Gifts`;
     const total = calcPrice(p, detailState.opts) * detailState.qty;
     const gallery = productGallery(p);
-    const heroImg = gallery[detailState.gallery] || p.image;
-    const heroIdx = Math.min(detailState.gallery, gallery.length - 1);
-    if (heroIdx !== detailState.gallery) detailState.gallery = heroIdx;
+    const isBouquet = p.category === 'flowers' || p.category === 'wedding';
+    if (isBouquet && !detailState.opts.flowerColor) detailState.opts.flowerColor = FLOWER_COLORS[0];
+    if (isBouquet && !detailState.opts.coverColor) detailState.opts.coverColor = COVER_COLORS[0];
+    if (isBouquet && !detailState._initialized) {
+      syncDetailGalleryToOptions(gallery, p.image);
+      detailState._initialized = true;
+    } else if (detailState.gallery < 0 && !detailState._heroSrc) {
+      detailState.gallery = 0;
+    }
+    const heroImg = detailState._heroSrc || gallery[Math.max(0, detailState.gallery)] || p.image;
 
     let preload = document.getElementById('detailImgPreload');
     if (!preload) {
@@ -684,9 +852,6 @@
       { icon: 'water_drop', title: 'The Daily Ritual', text: 'Place away from direct sunlight, drafts, and ripening fruit. Mist the petals lightly each morning.' },
     ];
     const wrappingArr = Array.isArray(p.wrapping) ? p.wrapping : [];
-    const isBouquet = p.category === 'flowers' || p.category === 'wedding';
-    if (isBouquet && !detailState.opts.flowerColor) detailState.opts.flowerColor = FLOWER_COLORS[0];
-    if (isBouquet && !detailState.opts.coverColor) detailState.opts.coverColor = COVER_COLORS[0];
 
     root.innerHTML = `
       <a class="font-label text-label-sm text-on-surface-variant hover:text-primary transition mb-8 inline-flex items-center gap-2" href="shop.html">
@@ -698,10 +863,16 @@
             <img alt="${p.name}" id="detailHeroImg" class="w-full h-full object-cover transition-opacity duration-300" src="${heroImg}" width="900" height="900" fetchpriority="high" decoding="async"/>
           </div>
           <div class="flex gap-3 md:gap-4 overflow-x-auto pb-1 snap-x snap-mandatory">
-            ${gallery.map((src, i) => `
-              <button type="button" class="snap-start shrink-0 w-[22%] min-w-[4.5rem] max-w-[7rem] aspect-square bg-surface-container rounded-md overflow-hidden cursor-pointer transition-all ${detailState.gallery === i ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-primary/40'}" data-gallery="${i}" aria-label="View photo ${i + 1}">
-                <img alt="${p.name} — colour variant ${i + 1}" class="w-full h-full object-cover" src="${productThumbUrl(src)}" width="120" height="120" loading="lazy" decoding="async"/>
-              </button>`).join('')}
+            ${gallery.map((src, i) => {
+              const colorLabel = flowerColorForImage(src) || `Photo ${i + 1}`;
+              return `
+              <button type="button" class="snap-start shrink-0 w-[22%] min-w-[4.5rem] max-w-[7rem] flex flex-col gap-1 cursor-pointer" data-gallery="${i}" aria-label="View ${colorLabel}">
+                <span class="aspect-square bg-surface-container rounded-md overflow-hidden transition-all ${detailState.gallery === i ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-primary/40'}">
+                  <img alt="${p.name} — ${colorLabel}" class="w-full h-full object-cover" src="${productThumbUrl(src)}" width="120" height="120" loading="lazy" decoding="async"/>
+                </span>
+                ${flowerColorForImage(src) ? `<span class="font-label text-[9px] uppercase tracking-wide text-center text-on-surface-variant truncate">${colorLabel}</span>` : ''}
+              </button>`;
+            }).join('')}
           </div>
         </div>
         <div class="lg:col-span-5 lg:sticky lg:top-32 reveal">
@@ -822,23 +993,24 @@
     root.querySelectorAll('[data-gallery]').forEach(b => b.addEventListener('click', () => {
       const idx = parseInt(b.dataset.gallery, 10);
       if (idx === detailState.gallery) return;
+      detailState.galleryLocked = true;
       detailState.gallery = idx;
-      const src = gallery[idx];
-      const hero = document.getElementById('detailHeroImg');
-      if (hero && src) {
-        hero.style.opacity = '0.5';
-        const preload = new Image();
-        preload.onload = () => { hero.src = src; hero.style.opacity = '1'; };
-        preload.src = src;
-      }
-      root.querySelectorAll('[data-gallery]').forEach(btn => {
-        const i = parseInt(btn.dataset.gallery, 10);
-        const on = i === idx;
-        btn.className = `snap-start shrink-0 w-[22%] min-w-[4.5rem] max-w-[7rem] aspect-square bg-surface-container rounded-md overflow-hidden cursor-pointer transition-all ${on ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-primary/40'}`;
-      });
+      detailState._heroSrc = gallery[idx];
+      const thumbColor = flowerColorForImage(gallery[idx]);
+      if (thumbColor) detailState.opts.flowerColor = thumbColor;
+      setDetailHeroImage(gallery[idx], root);
+      updateDetailColorButtons(root);
     }));
-    root.querySelectorAll('[data-flower-color]').forEach(b => b.addEventListener('click', () => { detailState.opts.flowerColor = b.dataset.flowerColor; renderDetail(p); }));
-    root.querySelectorAll('[data-cover-color]').forEach(b => b.addEventListener('click', () => { detailState.opts.coverColor = b.dataset.coverColor; renderDetail(p); }));
+    root.querySelectorAll('[data-flower-color]').forEach(b => b.addEventListener('click', () => {
+      detailState.opts.flowerColor = b.dataset.flowerColor;
+      detailState.galleryLocked = false;
+      applyDetailColorPhoto(gallery, p.image, root);
+    }));
+    root.querySelectorAll('[data-cover-color]').forEach(b => b.addEventListener('click', () => {
+      detailState.opts.coverColor = b.dataset.coverColor;
+      detailState.galleryLocked = false;
+      applyDetailColorPhoto(gallery, p.image, root);
+    }));
     root.querySelectorAll('[data-wrap]').forEach(b => b.addEventListener('click', () => { detailState.opts.wrap = b.dataset.wrap; renderDetail(p); }));
     root.querySelectorAll('[data-qty]').forEach(b => b.addEventListener('click', () => {
       const d = parseInt(b.dataset.qty, 10);
@@ -867,7 +1039,7 @@
     const root = document.getElementById('detailContent');
     if (!root) return;
     root.innerHTML = loadingHTML('Loading product...');
-    detailState = { qty: 1, opts: { flowerColor: FLOWER_COLORS[0], coverColor: COVER_COLORS[0] }, gallery: 0 };
+    detailState = { qty: 1, opts: { flowerColor: FLOWER_COLORS[0], coverColor: COVER_COLORS[0] }, gallery: 0, galleryLocked: false, _initialized: false };
     const id = parseInt(new URLSearchParams(location.search).get('id'), 10);
     if (!id) { root.innerHTML = errorHTML('No product selected.'); return; }
     try {

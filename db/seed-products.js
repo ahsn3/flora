@@ -4,6 +4,7 @@
  */
 const img = (slug) => `/assets/products/${slug}.jpg`;
 const gl = (...slugs) => slugs.map(img);
+const rr = (color) => `/assets/products/romantic-rose-bouquet/${color}.jpg`;
 
 module.exports = [
   {
@@ -11,8 +12,15 @@ module.exports = [
     tagline: 'Velvet Petals & Poetry',
     category: 'flowers',
     price: 1500,
-    image: img('romantic-rose-bouquet'),
-    gallery: gl('romantic-rose-bouquet', 'velvet-jewelry-box-rose', 'chocolate-and-roses', 'rose-gold-anniversary'),
+    image: rr('classic-red'),
+    gallery: [
+      rr('classic-red'),
+      rr('soft-pink'),
+      rr('pure-white'),
+      rr('lavender'),
+      rr('sunshine-yellow'),
+      rr('seasonal-mix'),
+    ],
     desc: 'A classic arrangement of 24 premium red roses, symbolizing deep love and passion. Each stem is hand-selected for optimal freshness.',
     wrapping: ['Classic Wrap', 'Luxury Velvet', 'Kraft Paper'],
     card: true,

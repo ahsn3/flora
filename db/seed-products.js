@@ -1,9 +1,8 @@
 /**
- * Product catalog — premium Pexels photos matched to each product name.
- * Images refresh on deploy via server.js (UPDATE by product name).
+ * Product catalog — images served from /assets/products/ (Stitch floral art).
+ * Each file is downloaded from verified Flora & Gifts design assets.
  */
-const px = (id) =>
-  `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=1200&h=1500&fit=crop`;
+const img = (slug) => `/assets/products/${slug}.jpg`;
 
 module.exports = [
   {
@@ -11,7 +10,7 @@ module.exports = [
     tagline: 'Velvet Petals & Poetry',
     category: 'flowers',
     price: 1500,
-    image: px(1523528), // premium red rose bouquet
+    image: img('romantic-rose-bouquet'),
     desc: 'A classic arrangement of 24 premium red roses, symbolizing deep love and passion. Each stem is hand-selected for optimal freshness.',
     wrapping: ['Classic Wrap', 'Luxury Velvet', 'Kraft Paper'],
     card: true,
@@ -22,7 +21,7 @@ module.exports = [
     tagline: 'Pastel Harmony & Light',
     category: 'flowers',
     price: 1200,
-    image: px(931176), // mixed pastel wildflower meadow bouquet
+    image: img('spring-wildflowers'),
     desc: "A vibrant mix of seasonal wildflowers — tulips, daisies, ranunculus, and baby's breath — capturing the spirit of spring.",
     wrapping: ['Natural Twine', 'Pastel Ribbon', 'No Wrapping'],
     card: true,
@@ -33,8 +32,8 @@ module.exports = [
     tagline: 'Deep Burgundy Majesty',
     category: 'flowers',
     price: 2200,
-    image: px(1366631), // phalaenopsis orchid close-up
-    gallery: [px(1366631), px(4041392), px(4041391), px(1126993)],
+    image: img('orchid-elegance'),
+    gallery: [img('orchid-elegance'), img('orchid-elegance-2'), img('orchid-elegance-3'), img('orchid-elegance-4')],
     desc: 'Hand-selected orchids with depth of color and structural perfection.',
     wrapping: ['Gift Box', 'Open Vase', 'Ribbon Only'],
     card: true,
@@ -53,7 +52,7 @@ module.exports = [
     tagline: 'Radiant Golden Fields',
     category: 'flowers',
     price: 950,
-    image: px(1022923), // bright sunflower bouquet
+    image: img('sunflower-sunshine'),
     desc: 'Bright sunflowers with eucalyptus and cream chamomile.',
     wrapping: ['Burlap Wrap', 'Yellow Ribbon', 'No Wrapping'],
     card: true,
@@ -64,7 +63,7 @@ module.exports = [
     tagline: 'A Curated Indulgence',
     category: 'gifts',
     price: 3200,
-    image: px(4195325), // luxury gift basket with treats
+    image: img('luxury-gift-hamper'),
     desc: 'Chocolates, nuts, honey, scented candle, and a petite bouquet.',
     wrapping: ['Gift Basket', 'Wooden Crate', 'Premium Box'],
     card: true,
@@ -75,7 +74,7 @@ module.exports = [
     tagline: 'Sweet Romance',
     category: 'gifts',
     price: 1800,
-    image: px(3228980), // roses with romantic gift presentation
+    image: img('chocolate-and-roses'),
     desc: 'Red roses with handcrafted Belgian chocolates in a velvet-lined box.',
     wrapping: ['Red Velvet Box', 'Gold Ribbon Box', 'Simple Wrap'],
     card: true,
@@ -86,7 +85,7 @@ module.exports = [
     tagline: 'Sandalwood & White Orchid',
     category: 'gifts',
     price: 1300,
-    image: px(1024960), // luxury scented candles
+    image: img('scented-candle-set'),
     desc: 'Three luxury soy candles in rose, jasmine, and oud.',
     wrapping: ['Linen Bag', 'Gift Box', 'No Wrapping'],
     card: false,
@@ -97,7 +96,7 @@ module.exports = [
     tagline: 'Symphony of Whites',
     category: 'wedding',
     price: 5000,
-    image: px(265940), // white roses wedding table centerpiece
+    image: img('wedding-centerpiece'),
     desc: 'Grand centerpiece with white roses, peonies, and greenery.',
     wrapping: ['As-is', 'With Stand', 'Floating Design'],
     card: false,
@@ -108,7 +107,7 @@ module.exports = [
     tagline: 'A Cascade of Romance',
     category: 'wedding',
     price: 4000,
-    image: px(2253871), // white bridal bouquet
+    image: img('bridal-bouquet'),
     desc: 'Bespoke bridal bouquet with ribbon cascade finish.',
     wrapping: ['Satin Ribbon', 'Lace Wrap', 'Pearl Pins'],
     card: false,
@@ -119,7 +118,7 @@ module.exports = [
     tagline: 'Hand-Thrown Stoneware',
     category: 'gifts',
     price: 750,
-    image: px(114895), // minimalist ceramic vase
+    image: img('terra-ceramic-vase'),
     desc: 'Minimalist stoneware vase in earthy neutral tones.',
     wrapping: ['Wooden Tray', 'Gift Box', 'No Wrapping'],
     card: false,
@@ -130,7 +129,7 @@ module.exports = [
     tagline: 'A Quiet Reverie',
     category: 'flowers',
     price: 1100,
-    image: px(3297347), // lavender field bouquet
+    image: img('lavender-dreams'),
     desc: 'Lavender, white roses, and sage for a serene atmosphere.',
     wrapping: ['Kraft Paper', 'Linen Bundle', 'No Wrapping'],
     card: true,
@@ -141,7 +140,7 @@ module.exports = [
     tagline: 'A Joyful Celebration',
     category: 'gifts',
     price: 2400,
-    image: px(931174), // vibrant mixed birthday bouquet
+    image: img('birthday-bloom-box'),
     desc: 'Seasonal flowers, balloon, sparkler candle, and personal card.',
     wrapping: ['Signature Box', 'Pink Box', 'Gold Box'],
     card: true,
@@ -152,7 +151,7 @@ module.exports = [
     tagline: 'Soft Romance in Bloom',
     category: 'flowers',
     price: 1850,
-    image: px(3607565), // blush pink peonies
+    image: img('peony-blush-garden'),
     desc: 'Blush peonies with garden roses and eucalyptus.',
     wrapping: ['Silk Ribbon', 'Velvet Wrap', 'Gift Box'],
     card: true,
@@ -163,7 +162,7 @@ module.exports = [
     tagline: 'Deep Hues & Grace',
     category: 'flowers',
     price: 1350,
-    image: px(1126926), // deep purple tulips
+    image: img('midnight-tulip-trio'),
     desc: 'Premium tulips hand-tied with seasonal greenery.',
     wrapping: ['Kraft Paper', 'Classic Wrap', 'No Wrapping'],
     card: true,
@@ -174,7 +173,7 @@ module.exports = [
     tagline: 'Fresh Zest & Petals',
     category: 'flowers',
     price: 1050,
-    image: px(1457820), // orange marigold / citrus-toned blooms
+    image: img('citrus-and-bloom'),
     desc: 'Citrus-toned blooms with chamomile accents.',
     wrapping: ['Natural Twine', 'Pastel Ribbon', 'No Wrapping'],
     card: true,
@@ -185,7 +184,7 @@ module.exports = [
     tagline: 'Sip & Savor',
     category: 'gifts',
     price: 1650,
-    image: px(230477), // tea service with botanical styling
+    image: img('artisan-tea-and-bloom'),
     desc: 'Botanical tea set with a petite bouquet and card.',
     wrapping: ['Gift Box', 'Linen Wrap', 'No Wrapping'],
     card: true,
@@ -196,7 +195,7 @@ module.exports = [
     tagline: 'Keepsake Romance',
     category: 'gifts',
     price: 2100,
-    image: px(2878405), // preserved rose in gift box
+    image: img('velvet-jewelry-box-rose'),
     desc: 'Preserved rose in a velvet jewelry box.',
     wrapping: ['Velvet Box', 'Gold Box', 'Ribbon Only'],
     card: true,
@@ -207,7 +206,7 @@ module.exports = [
     tagline: 'Tabletop Poetry',
     category: 'wedding',
     price: 3800,
-    image: px(168831), // pastel garden table florals
+    image: img('garden-party-centerpiece'),
     desc: 'Low lush centerpiece in pastels for intimate receptions.',
     wrapping: ['As-is', 'With Stand', 'Floating Design'],
     card: false,
@@ -218,7 +217,7 @@ module.exports = [
     tagline: 'Desert Calm',
     category: 'gifts',
     price: 890,
-    image: px(941555), // succulent plants in pots
+    image: img('mini-succulent-grove'),
     desc: 'Three succulents in ceramic pots with care guide.',
     wrapping: ['Wooden Tray', 'Gift Box', 'No Wrapping'],
     card: true,
@@ -229,7 +228,7 @@ module.exports = [
     tagline: 'Billowing Blues & Whites',
     category: 'flowers',
     price: 1750,
-    image: px(4207730), // blue hydrangea blooms
+    image: img('hydrangea-cloud'),
     desc: 'Hydrangea clusters with white roses and dusty miller.',
     wrapping: ['Classic Wrap', 'Silk Ribbon', 'Gift Box'],
     card: true,
@@ -240,7 +239,7 @@ module.exports = [
     tagline: 'Twenty-Five Years of Love',
     category: 'gifts',
     price: 2900,
-    image: px(1453243), // soft peach / blush roses
+    image: img('rose-gold-anniversary'),
     desc: 'Blush roses, champagne truffles, and a rose-gold vase.',
     wrapping: ['Luxury Velvet', 'Gold Box', 'Ribbon Only'],
     card: true,
@@ -251,7 +250,7 @@ module.exports = [
     tagline: 'A Path of Petals',
     category: 'wedding',
     price: 2200,
-    image: px(265722), // rose petals on wedding aisle
+    image: img('ceremony-aisle-petals'),
     desc: 'Rose and hydrangea petals for aisle scatter.',
     wrapping: ['As-is', 'Basket Delivery', 'Ribbon Bundle'],
     card: false,
@@ -262,7 +261,7 @@ module.exports = [
     tagline: 'Gentle Remembrance',
     category: 'flowers',
     price: 1400,
-    image: px(969914), // white lily arrangement
+    image: img('sympathy-white-lilies'),
     desc: 'White lilies and eucalyptus in a muted wrap.',
     wrapping: ['Ivory Wrap', 'Simple Ribbon', 'No Wrapping'],
     card: true,

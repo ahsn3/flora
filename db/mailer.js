@@ -1,12 +1,3 @@
-/* Email sender for PIN verification.
- *
- * Providers (first match wins):
- *   1. EmailJS — uses your connected Gmail (good for any recipient, 200/mo free)
- *   2. Resend API — needs a verified domain to email anyone
- *   3. SMTP — often broken on Railway
- * Dev: if none configured, PINs print to the console.
- */
-
 const nodemailer = require('nodemailer');
 const dns = require('dns');
 
@@ -60,9 +51,7 @@ function getEmailProviderStatus() {
 }
 const useResend = Boolean(RESEND_API_KEY);
 const useSmtp = Boolean(HOST && USER && PASS);
-/** True when real emails can be sent */
 const emailEnabled = useEmailjs || useResend || useSmtp;
-/** @deprecated use emailEnabled */
 const smtpEnabled = emailEnabled;
 
 let transporter = null;
@@ -133,8 +122,6 @@ function pinEmailText(pin, purpose = 'signup') {
   }
   return `Welcome to Flora & Gifts.\n\nYour verification code is: ${pin}\n\nIt expires in 10 minutes. If you didn't request this, you can ignore this email.\n\n— Flora & Gifts`;
 }
-
-/** Server-side EmailJS — same Gmail service you use in the EmailJS dashboard. */
 async function sendViaEmailjs(to, pin, purpose = 'signup') {
   const templateId =
     purpose === 'reset' && EMAILJS_RESET_TEMPLATE_ID

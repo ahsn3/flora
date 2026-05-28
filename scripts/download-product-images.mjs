@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/** Download verified Stitch/Google floral assets into public/assets/products/ */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,8 +25,6 @@ const SOURCES = {
   eventGarden: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCNOV-ExAcb4cOfeXnKlufWuHyhw9rRva_iEX2YXb22ELOAh8dDLLDd7p9PvtHtmBM5bZ_DVNrU09Rsr9I-pF7JyxUA0lYERh519kyMMC4_COlcgfFt3MbXoWN_yo0CKk9UQ2ZkjmDezvq_HaSSEN777HjHdsCg-5VvqHTKE1v38amGtpOin5G-haWWVZ5byde2-nkTLxhCnoqYljq2BxYdSMzEJ1-FnDN_Z1nN-TJiULRsMQsRhKykJVfAz2ei4xHS_zxpkoBXDWU',
   eventCorp: 'https://lh3.googleusercontent.com/aida-public/AB6AXuA3097KEuAEt6VeE6bZRGDFxgN7eBUX7Dw8XYGH7CMBcaE-Roh3bU-6haA3gxAsXTHR87wIGiMHUu9mui4lWa1yOR5fjItxpztFW64e8TYPxm1-jo5bactxHX7fLlBGldPLUIqvLWWlqHLtkexc-2-L0tafb6Ht1Kdd8s9j0_IIzbBMVLFX8RYy_jS6OzmJx2cPXDxlFx0TY7fQuC1JDQZEC0Ph7PtvLZyAxZeWUkflY4jjDrXf_9l-jqmKyP-oWdUCcAjR9x1yDEQ',
 };
-
-/** product slug -> source key */
 const FILES = {
   'romantic-rose-bouquet': 'rose',
   'spring-wildflowers': 'wildflower',

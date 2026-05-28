@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-/**
- * Generate compressed thumbnails for shop grid / gallery strips.
- * Uses macOS `sips` when available; falls back to sharp if installed.
- */
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';

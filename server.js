@@ -1,11 +1,3 @@
-/* Flora & Gifts — Express + Postgres backend
- * Serves static files from public/ and exposes a JSON API at /api/*
- *
- * Required env:
- *   DATABASE_URL  Postgres connection string (Railway provides automatically)
- *   JWT_SECRET    Secret for signing JWTs (set this in Railway → Variables)
- *   PORT          Port to listen on (Railway provides automatically) */
-
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
@@ -32,7 +24,6 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-// ─── DB SCHEMA + SEED ───────────────────────────────────────────────
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -99,7 +90,6 @@ async function initDb() {
     );
   `);
 
-  // Schema upgrade for older deployments — add email_verified column if missing
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE email_pins ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'signup'`);
   console.log('✓ Schema ready');
@@ -114,7 +104,7 @@ async function initDb() {
     );
     console.log('✓ Seeded admin user (admin@flora.com / admin123)');
   } else {
-    // Make sure the seeded admin is always considered verified
+
     await pool.query("UPDATE users SET email_verified = TRUE WHERE email = $1 AND email_verified = FALSE", [adminEmail]);
   }
 
@@ -159,7 +149,6 @@ async function initDb() {
   }
 }
 
-// ─── AUTH MIDDLEWARE ────────────────────────────────────────────────
 function auth(required = true) {
   return (req, res, next) => {
     const header = req.headers.authorization || '';
@@ -187,8 +176,6 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 
 let dbReady = false;
 
-// ─── HEALTHCHECK ────────────────────────────────────────────────────
-// Railway probes this before initDb() finishes — must respond 200 quickly.
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     ok: true,
@@ -204,7 +191,6 @@ app.get('/api/health/ready', wrap(async (req, res) => {
   res.json({ ok: true, env: NODE_ENV, email: getEmailProviderStatus() });
 }));
 
-// ─── AUTH ROUTES ────────────────────────────────────────────────────
 const PIN_TTL_MS = 10 * 60 * 1000;       // 10 minutes
 const PIN_RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds between sends
 const PIN_MAX_ATTEMPTS = 5;
@@ -270,11 +256,6 @@ async function issuePinEmail(lower, pin, purpose) {
     [lower, pinHash, purpose]
   );
 }
-
-/** POST /api/auth/send-pin
- *  Body: { email }
- *  Stores a 10-minute, single-use PIN keyed by email (case-insensitive) and
- *  emails it to the address. Rate-limited to 1 send per 30 seconds. */
 app.post('/api/auth/send-pin', wrap(async (req, res) => {
   const { email } = req.body || {};
   if (!isValidEmail(email)) return res.status(400).json({ error: 'A valid email is required' });
@@ -293,11 +274,6 @@ app.post('/api/auth/send-pin', wrap(async (req, res) => {
   }
   res.json({ ok: true, email: lower, expiresInSec: PIN_TTL_MS / 1000, devMode: !smtpEnabled });
 }));
-
-/** POST /api/auth/register
- *  Body: { name, email, password, pin }
- *  Requires a valid recent PIN. Creates the user as email_verified=TRUE
- *  and returns a JWT. */
 app.post('/api/auth/register', wrap(async (req, res) => {
   const { name, email, password, pin } = req.body || {};
   if (!name || !email || !password || !pin) return res.status(400).json({ error: 'Name, email, password, and verification code are required' });
@@ -337,7 +313,7 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   const hash = await bcrypt.hash(password, 10);
   let user;
   if (exists.rows.length) {
-    // User existed but was unverified — update their password + mark verified
+
     const upd = await pool.query(
       "UPDATE users SET name=$1, password_hash=$2, email_verified=TRUE WHERE email=$3 RETURNING id, name, email, role",
       [name.trim(), hash, lower]
@@ -371,8 +347,6 @@ app.get('/api/auth/me', auth(true), wrap(async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'User not found' });
   res.json({ user: rows[0] });
 }));
-
-/** POST /api/auth/forgot-password — emails a 6-digit reset code if the account exists */
 app.post('/api/auth/forgot-password', wrap(async (req, res) => {
   const { email } = req.body || {};
   if (!isValidEmail(email)) return res.status(400).json({ error: 'A valid email is required' });
@@ -392,8 +366,6 @@ app.post('/api/auth/forgot-password', wrap(async (req, res) => {
     expiresInSec: PIN_TTL_MS / 1000,
   });
 }));
-
-/** POST /api/auth/reset-password — verify reset code and set new password */
 app.post('/api/auth/reset-password', wrap(async (req, res) => {
   const { email, pin, password } = req.body || {};
   if (!isValidEmail(email) || !pin || !password) {
@@ -433,7 +405,6 @@ app.post('/api/auth/reset-password', wrap(async (req, res) => {
   res.json({ ok: true, message: 'Password updated. You can sign in now.' });
 }));
 
-// ─── CONTACT ────────────────────────────────────────────────────────
 app.post('/api/contact', wrap(async (req, res) => {
   const { name, email, subject, message } = req.body || {};
   if (!name || !isValidEmail(email) || !message) {
@@ -452,7 +423,6 @@ app.post('/api/contact', wrap(async (req, res) => {
   res.json({ ok: true, message: 'Thank you — we will reply within 1–2 business days.' });
 }));
 
-// ─── PRODUCTS ───────────────────────────────────────────────────────
 function rowToProduct(r) {
   return {
     id: r.id,
@@ -508,7 +478,6 @@ app.delete('/api/products/:id', auth(true), requireAdmin, wrap(async (req, res) 
   res.json({ ok: true });
 }));
 
-// ─── ORDERS ─────────────────────────────────────────────────────────
 function rowToOrder(r, userEmail) {
   return {
     id: 'ORD' + String(r.id).padStart(4, '0'),
@@ -541,7 +510,6 @@ app.post('/api/orders', auth(true), wrap(async (req, res) => {
   res.json(rowToOrder(rows[0], req.user.email));
 }));
 
-// ─── RESERVATIONS ───────────────────────────────────────────────────
 app.get('/api/reservations/dates', wrap(async (req, res) => {
   const { rows } = await pool.query(
     "SELECT to_char(event_date,'YYYY-MM-DD') AS d FROM reservations WHERE status <> 'cancelled'"
@@ -562,7 +530,6 @@ app.post('/api/reservations', wrap(async (req, res) => {
   res.json(rows[0]);
 }));
 
-// ─── ADMIN ──────────────────────────────────────────────────────────
 app.get('/api/admin/stats', auth(true), requireAdmin, wrap(async (req, res) => {
   const [orders, users, resv] = await Promise.all([
     pool.query('SELECT COUNT(*)::int AS c, COALESCE(SUM(total),0)::float AS rev FROM orders'),
@@ -677,7 +644,6 @@ app.delete('/api/admin/reservations/:id', auth(true), requireAdmin, wrap(async (
   res.json({ ok: true });
 }));
 
-// ─── STATIC + SPA FALLBACK ──────────────────────────────────────────
 const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
 
@@ -691,8 +657,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Server error' });
 });
 
-// ─── BOOT ───────────────────────────────────────────────────────────
-// Listen immediately so Railway healthchecks pass while Postgres/schema init runs.
 app.listen(PORT, () => {
   console.log(`✿ Flora & Gifts listening on :${PORT} (${NODE_ENV})`);
   initDb()

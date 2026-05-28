@@ -7,7 +7,10 @@ An artisanal botanical boutique — full-stack web app with a refined Material 3
 - **Real authentication** — bcrypt-hashed passwords, JWT-based sessions, role-based access (`user` / `admin`)
 - **Email PIN verification on signup** — 6-digit code, 10-min TTL, 30-sec resend cooldown, max 5 attempts, branded HTML email template, works with Gmail/Resend/SendGrid/Brevo or any SMTP
 - **Live database** — Postgres-backed users, products, orders, and reservations
-- **9 dedicated pages** — Home, Shop, Product detail, Cart, Checkout, Events, Auth, Orders, Admin
+- **12 pages** — Home, Shop, Product detail, Cart, Checkout, Events, Auth, Orders, Profile, Favourites, Contact, Admin
+- **Product customization** — flower colour, wrapping colour, wrapping style, gift card message
+- **Favourites** — saved products in `localStorage`
+- **Password reset** — email PIN flow for forgotten passwords
 - **Live admin dashboard** — stats, orders (with status updates), reservations, users, and product CRUD
 - **Persistent shopping cart** in `localStorage` (survives reloads, anonymous-friendly)
 - **Bookmarkable URLs** — e.g. `product.html?id=3`
@@ -34,7 +37,10 @@ flora-gifts/
 ├── railway.json             Railway build/deploy config
 ├── .env.example
 ├── db/
-│   └── seed-products.js     Default product catalog
+│   ├── schema.sql           PostgreSQL DDL (tables, indexes)
+│   ├── DATABASE.md          Table and column reference
+│   ├── seed-products.js     Default product catalog
+│   └── mailer.js            Email (EmailJS / Resend / SMTP)
 └── public/                  All static assets, served at /
     ├── index.html           Home
     ├── shop.html            Product gallery + filters + search
@@ -42,9 +48,13 @@ flora-gifts/
     ├── cart.html
     ├── checkout.html
     ├── events.html          Events / reservation form
-    ├── auth.html            Login / Register
+    ├── auth.html            Login / Register / Forgot password
     ├── orders.html          My orders
+    ├── profile.html         Profile and change password
+    ├── favorites.html       Saved products
+    ├── contact.html         Store location and hours
     ├── admin.html           Admin dashboard
+    ├── assets/items/        Source product photos (by item folder)
     └── assets/
         ├── css/styles.css
         └── js/
@@ -60,7 +70,10 @@ flora-gifts/
 | POST   | `/api/auth/send-pin`              | —      | Email a 6-digit verification code      |
 | POST   | `/api/auth/register`              | —      | Verify PIN + create account            |
 | POST   | `/api/auth/login`                 | —      | Issue JWT (requires verified email)    |
+| POST   | `/api/auth/forgot-password`       | —      | Send password reset PIN                |
+| POST   | `/api/auth/reset-password`        | —      | Set new password with PIN              |
 | GET    | `/api/auth/me`                    | user   | Current user                           |
+| POST   | `/api/contact`                    | —      | Save contact form message              |
 | GET    | `/api/products`                   | —      | List all products                      |
 | GET    | `/api/products/:id`               | —      | One product                            |
 | POST   | `/api/products`                   | admin  | Create product                         |
@@ -73,8 +86,12 @@ flora-gifts/
 | GET    | `/api/admin/users`                | admin  | All users + order count                |
 | GET    | `/api/admin/orders`               | admin  | All orders with user email             |
 | PATCH  | `/api/admin/orders/:id`           | admin  | Update status                          |
+| DELETE | `/api/admin/orders/:id`           | admin  | Delete order                           |
+| PATCH  | `/api/admin/users/:id`            | admin  | Change user role                       |
+| DELETE | `/api/admin/users/:id`             | admin  | Delete user                            |
 | GET    | `/api/admin/reservations`         | admin  | All reservations                       |
 | PATCH  | `/api/admin/reservations/:id`     | admin  | Update reservation status              |
+| DELETE | `/api/admin/reservations/:id`     | admin  | Delete reservation                     |
 
 Auth via `Authorization: Bearer <jwt>` header.
 
@@ -97,6 +114,26 @@ npm start
 ```
 
 Open <http://localhost:3000>. Schema and seed data are created automatically on first run.
+
+## Database schema
+
+SQL definition: [`db/schema.sql`](db/schema.sql)  
+Full column reference: [`db/DATABASE.md`](db/DATABASE.md)
+
+```bash
+psql "$DATABASE_URL" -f db/schema.sql
+```
+
+| Table | Purpose |
+| ----- | ------- |
+| `users` | Accounts (name, email, password hash, role, email verified) |
+| `email_pins` | Sign-up and password-reset verification codes |
+| `contact_messages` | Contact form submissions |
+| `products` | Catalogue items (price, stock, images, gallery JSON) |
+| `orders` | Placed orders linked to `users` |
+| `reservations` | Event date bookings and inquiries |
+
+Relationships: `orders.user_id` → `users.id` (ON DELETE SET NULL).
 
 ## Email PIN verification
 
@@ -125,7 +162,7 @@ Security guards baked in:
 4. Under **Variables**, add:
    - `JWT_SECRET` — a long random string (e.g. `openssl rand -hex 48`)
    - `NODE_ENV=production`
-   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` — see `.env.example` for provider-specific values
+   - Email: `EMAILJS_*` keys (recommended) or `SMTP_*` / `RESEND_*` — see `.env.example`
 5. Railway auto-detects Node and runs `npm start`. The healthcheck at `/api/health` will go green once the DB is reachable.
 
 That's it — admin@flora.com / admin123 is seeded on first boot.

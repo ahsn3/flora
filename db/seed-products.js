@@ -1,7 +1,3 @@
-/**
- * Product catalog — images served from /assets/products/ (Stitch floral art).
- * Each file is downloaded from verified Flora & Gifts design assets.
- */
 const img = (slug) => `/assets/products/${slug}.jpg`;
 const gl = (...slugs) => slugs.map(img);
 const rr = (color) => `/assets/products/romantic-rose-bouquet/${color}.jpg`;

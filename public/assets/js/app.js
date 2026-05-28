@@ -1,10 +1,6 @@
-/* Flora & Gifts — frontend
- * All business state (users, products, orders, reservations) lives in Postgres
- * and is fetched via /api/*. Cart stays in localStorage for anonymous shoppers. */
 (function () {
   'use strict';
 
-  // ─── CONSTANTS ────────────────────────────────────────────────
   const CURRENCY = { symbol: '₺', code: 'TRY' };
   const fmt = (n) => CURRENCY.symbol + Number(n || 0).toLocaleString('tr-TR');
   const WRAP_BASIC = 75, WRAP_LUX = 150, CARD_COST = 100, DELIVERY = 300;
@@ -37,8 +33,6 @@
     if (p.gallery && p.gallery.length) return p.gallery;
     return p.image ? [p.image] : [];
   }
-
-  /** Filename keys for per-colour product photos (e.g. romantic-rose-bouquet/classic-red.jpg) */
   const FLOWER_COLOR_FILE = {
     'Classic Red': 'classic-red',
     'Soft Pink': 'soft-pink',
@@ -69,8 +63,6 @@
     }
     return null;
   }
-
-  /** Slug fragments used to pick the best gallery photo for a colour option */
   const FLOWER_COLOR_SLUGS = {
     'Classic Red': ['romantic-rose-bouquet', 'velvet-jewelry-box-rose', 'chocolate-and-roses'],
     'Soft Pink': ['peony-blush-garden', 'rose-gold-anniversary', 'birthday-bloom-box', 'bridal-bouquet'],
@@ -210,7 +202,6 @@
     mapEmbed: 'https://www.google.com/maps?q=Ni%C5%9Fanta%C5%9F%C4%B1%2C+Istanbul&output=embed',
   };
 
-  // ─── PERSISTENCE (cart + token only) ──────────────────────────
   const KEY = 'flora.';
   const Store = {
     get(k, fb) { try { const v = localStorage.getItem(KEY + k); return v ? JSON.parse(v) : fb; } catch { return fb; } },
@@ -227,18 +218,15 @@
   let products = [];
   let productsLoaded = false;
 
-  // Normalize state on load: a cached user without a token is meaningless.
-  // Always start logged-out unless we have a token to validate against the server.
   if (!token && currentUser) {
     currentUser = null;
     Store.clear('user');
   }
 
-  // ─── API CLIENT ───────────────────────────────────────────────
   async function api(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = 'Bearer ' + token;
-    // Fail-fast: don't let a hung request lock up the UI.
+
     const controller = new AbortController();
     const timeoutMs = opts.timeoutMs || 20000;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -266,8 +254,6 @@
       err.status = res.status;
       err.data = data;
       if (res.status === 401) {
-        // Always clear stale auth on any 401, even if no token was sent.
-        // This prevents the nav showing "logged in" state while the API rejects everything.
         if (token) { token = null; Store.clear('token'); }
         if (currentUser) { currentUser = null; Store.clear('user'); }
       }
@@ -304,7 +290,6 @@
     submitContact: (body) => api('/api/contact', { method: 'POST', body }),
   };
 
-  // ─── LAYOUT TEMPLATES ─────────────────────────────────────────
   function userInitials(name) {
     return String(name || 'U').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'U';
   }
@@ -502,7 +487,6 @@
     <div class="toast" id="toast"></div>`;
   }
 
-  // ─── UI HELPERS ───────────────────────────────────────────────
   function toast(msg) {
     const t = document.getElementById('toast');
     if (!t) { console.log('[toast]', msg); return; }
@@ -584,7 +568,7 @@
         doLogout();
       });
     });
-    // Also wire up the legacy id-based buttons
+
     ['navLogoutBtn', 'logoutDrawerBtn', 'logoutBtn', 'adminLogoutBtn', 'profileLogoutBtn'].forEach(id => {
       const el = document.getElementById(id);
       if (el && !el._floraBound) {
@@ -691,7 +675,6 @@
     </div>`;
   }
 
-  // ─── PRODUCT CACHE ────────────────────────────────────────────
   async function ensureProducts() {
     if (productsLoaded) return products;
     products = await Api.products();
@@ -699,7 +682,6 @@
     return products;
   }
 
-  // ─── CART ─────────────────────────────────────────────────────
   function calcPrice(p, opts) {
     let price = p.price;
     if (opts && opts.wrap) {
@@ -724,7 +706,6 @@
     toast('Added to your collection');
   }
 
-  // ─── PRODUCT CARD ─────────────────────────────────────────────
   function productCardHTML(p) {
     const full = p.image || '';
     const thumb = productThumbUrl(full);
@@ -758,7 +739,6 @@
     });
   }
 
-  // ─── PAGE: HOME ───────────────────────────────────────────────
   async function initHome() {
     const grid = document.getElementById('featuredGrid');
     if (!grid) { applyReveal(); return; }
@@ -773,7 +753,6 @@
     applyReveal();
   }
 
-  // ─── PAGE: SHOP ───────────────────────────────────────────────
   let shopState = { category: 'all', q: '' };
 
   function renderShop() {
@@ -820,7 +799,6 @@
     renderShop();
   }
 
-  // ─── PAGE: PRODUCT DETAIL ─────────────────────────────────────
   let detailState = { qty: 1, opts: {}, gallery: 0, galleryLocked: false, _initialized: false };
 
   function renderDetail(p) {
@@ -1063,7 +1041,6 @@
     }
   }
 
-  // ─── PAGE: CART ───────────────────────────────────────────────
   function renderCart() {
     const el = document.getElementById('cartContent');
     if (!el) return;
@@ -1135,7 +1112,6 @@
     renderCart();
   }
 
-  // ─── PAGE: CHECKOUT ───────────────────────────────────────────
   let checkoutState = { pm: 'cash' };
 
   async function initCheckout() {
@@ -1232,7 +1208,6 @@
     applyReveal();
   }
 
-  // ─── PAGE: EVENTS / RESERVATION ───────────────────────────────
   let eventsSuccess = false;
   let bookedDates = [];
 
@@ -1323,7 +1298,6 @@
     renderEventForm();
   }
 
-  // ─── PAGE: AUTH ───────────────────────────────────────────────
   let authMode = 'login'; // 'login' | 'register' | 'verify' | 'forgot' | 'reset'
   let pendingRegistration = null; // { name, email, password, sentAt }
   let pendingReset = null; // { email }
@@ -1426,7 +1400,6 @@
       return;
     }
 
-    // PIN verification step (after register details submitted)
     if (authMode === 'verify' && pendingRegistration) {
       const masked = pendingRegistration.email;
       el.innerHTML = `
@@ -1773,7 +1746,6 @@
     applyReveal();
   }
 
-  // ─── PAGE: ORDERS ─────────────────────────────────────────────
   async function initOrders() {
     const el = document.getElementById('ordersContent');
     if (!el) return;
@@ -1817,7 +1789,6 @@
     applyReveal();
   }
 
-  // ─── PAGE: ADMIN ──────────────────────────────────────────────
   let adminSection = 'dashboard';
   let adminCache = { stats: null, users: null, orders: null, reservations: null };
 
@@ -1974,7 +1945,7 @@
         }));
       }
     } catch (e) {
-      // If session was invalidated mid-render, send them to login.
+
       if (e.status === 401 || e.status === 403) {
         el.innerHTML = `
           <div class="text-center py-16 text-on-surface-variant">
@@ -1983,7 +1954,7 @@
             <p class="text-sm mb-6">Please log in again to continue.</p>
             <a class="bg-primary text-on-primary px-6 py-3 rounded-full text-sm uppercase tracking-widest" href="auth.html">Sign in</a>
           </div>`;
-        // Re-render nav so it shows logged-out state
+
         injectLayout();
         bindLogoutButtons();
         return;
@@ -1999,7 +1970,6 @@
     renderAdmin();
   }
 
-  // ─── BOOT ─────────────────────────────────────────────────────
   function injectLayout() {
     const page = document.body.dataset.page || 'home';
     const headEl = document.getElementById('site-nav');
@@ -2012,7 +1982,7 @@
 
   async function refreshSession() {
     if (!token) {
-      // No token means logged out, regardless of cached user.
+
       if (currentUser) { currentUser = null; Store.clear('user'); }
       return;
     }
@@ -2021,14 +1991,11 @@
       currentUser = user;
       Store.set('user', currentUser);
     } catch (e) {
-      // api() helper already cleared token + user on 401; continue as guest.
+
     }
   }
 
   async function boot() {
-    // 1. Render layout immediately with whatever cached state we have. This
-    //    guarantees the nav + footer appear instantly, even if the API is
-    //    slow or unreachable.
     injectLayout();
     setupDrawer();
     setupProfileMenu();
@@ -2038,9 +2005,6 @@
     syncFavoriteIcons();
     applyReveal();
 
-    // 2. Refresh session in the background. If the cached user turns out to
-    //    be stale (token expired, etc.), re-inject the layout so the nav
-    //    reflects the corrected state.
     const userBefore = currentUser ? currentUser.email : null;
     refreshSession().then(() => {
       const userAfter = currentUser ? currentUser.email : null;
@@ -2054,7 +2018,6 @@
       }
     }).catch(() => {});
 
-    // 3. Initialize the current page in parallel with the session refresh.
     const page = document.body.dataset.page;
     const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites, profile:initProfile }[page];
     if (init) {

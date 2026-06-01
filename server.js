@@ -571,7 +571,12 @@ function sanitizeCartItems(items) {
     if (!existing) map.set(key, item);
     else existing.qty = Math.max(existing.qty, qty);
   }
-  return Array.from(map.values());
+  let result = Array.from(map.values());
+  const totalQty = result.reduce((s, i) => s + i.qty, 0);
+  if (totalQty > 99 || result.length > 25) {
+    result = result.slice(0, 12).map((i) => ({ ...i, qty: Math.min(5, i.qty) }));
+  }
+  return result;
 }
 
 app.get('/api/cart', auth(true), wrap(async (req, res) => {
@@ -764,10 +769,19 @@ app.delete('/api/admin/reservations/:id', auth(true), requireAdmin, wrap(async (
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const ASSETS_DIR = path.join(PUBLIC_DIR, 'assets');
+const FLORA_BUILD = 'v8';
+
+app.use((req, res, next) => {
+  if (req.path.endsWith('.html') || req.path === '/' || req.path.endsWith('.css') || req.path.includes('/assets/js/')) {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
+  }
+  next();
+});
+
 app.use('/assets/js', express.static(path.join(ASSETS_DIR, 'js'), { maxAge: 0, etag: true }));
+app.use('/assets/css', express.static(path.join(ASSETS_DIR, 'css'), { maxAge: 0, etag: true }));
 app.use('/assets', express.static(ASSETS_DIR, {
-  maxAge: NODE_ENV === 'production' ? '7d' : 0,
-  immutable: NODE_ENV === 'production',
+  maxAge: NODE_ENV === 'production' ? '1d' : 0,
   etag: true,
 }));
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0, etag: true }));

@@ -10,7 +10,8 @@ body { font-family: 'Source Sans 3', sans-serif; -webkit-font-smoothing: antiali
   font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
-/* Boot: avoid empty header flash before app.js mounts nav */
+/* Boot: placeholder nav until app.js replaces shell */
+.nav-shell-placeholder { min-height: 3.5rem; }
 html.flora-booting #site-nav:empty {
   min-height: 4.75rem;
   background: #fff8f5;

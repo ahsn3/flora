@@ -432,7 +432,7 @@
       const raw = Store.get(k, []);
       if (!raw.length) continue;
       const deduped = dedupeCartLines(raw);
-      if (cartTotalQty(deduped) > 50 || deduped.length > 15) {
+      if (cartTotalQty(deduped) > 25 || deduped.length > 12) {
         const repaired = deduped.slice(0, 10).map((i) => ({ ...i, qty: Math.min(3, i.qty) }));
         Store.set(k, repaired);
       }
@@ -489,10 +489,16 @@
         serverOk = true;
       } catch {}
     }
-    cart = serverOk
-      ? reconcileCartSources(serverItems, guest)
-      : reconcileCartSources(local, guest);
-    Store.set(CART_GUEST, []);
+    if (serverOk) {
+      cart = serverItems.length
+        ? reconcileCartSources(serverItems)
+        : reconcileCartSources(guest, local);
+    } else {
+      cart = reconcileCartSources(local, guest);
+    }
+    Store.clear(CART_GUEST);
+    Store.clear('cart');
+    cart = sanitizeCart(cart);
     persistCart();
     notifyCartChanged();
   }
@@ -856,7 +862,7 @@
           </a>
           <a class="relative" href="cart.html" aria-label="Cart">
             <span class="material-symbols-outlined text-primary text-[28px]">shopping_bag</span>
-            <span class="absolute -top-2 -right-2 bg-primary text-on-primary text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold" data-cart-badge>0</span>
+            <span class="absolute -top-2 -right-2 bg-primary text-on-primary text-[10px] min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-full font-bold hidden" data-cart-badge>0</span>
           </a>
         </div>
         <div class="md:hidden flex items-center gap-3">
@@ -866,7 +872,7 @@
           </a>
           <a class="relative" href="cart.html" aria-label="Cart">
             <span class="material-symbols-outlined text-primary text-[26px]">shopping_bag</span>
-            <span class="absolute -top-1.5 -right-1.5 bg-primary text-on-primary text-[10px] w-4 h-4 flex items-center justify-center rounded-full font-bold" data-cart-badge>0</span>
+            <span class="absolute -top-1.5 -right-1.5 bg-primary text-on-primary text-[10px] min-w-[1rem] h-4 px-0.5 flex items-center justify-center rounded-full font-bold hidden" data-cart-badge>0</span>
           </a>
           <button class="text-primary p-1" id="navOpenBtn" aria-label="Open menu">
             <span class="material-symbols-outlined text-[28px]">menu</span>
@@ -934,7 +940,7 @@
           </div>
         </div>
         <div class="mt-12 pt-6 border-t border-outline-variant/30 flex flex-col md:flex-row justify-between items-center gap-3">
-          <p class="font-label text-label-sm text-on-surface-variant uppercase tracking-widest">© 2025 Flora &amp; Gifts. Crafted with botanical poetry.</p>
+          <p class="font-label text-label-sm text-on-surface-variant uppercase tracking-widest">© 2025 Flora &amp; Gifts. Crafted with botanical poetry. <span class="opacity-60 normal-case tracking-normal" data-flora-build>· v8</span></p>
           <div class="flex gap-6">
             <a class="font-label text-label-sm text-on-surface-variant hover:text-primary" href="#">Privacy</a>
             <a class="font-label text-label-sm text-on-surface-variant hover:text-primary" href="#">Terms</a>
@@ -1064,8 +1070,11 @@
   }
 
   function updateCartBadge() {
-    const count = cart.reduce((s, i) => s + i.qty, 0);
-    document.querySelectorAll('[data-cart-badge]').forEach(el => el.textContent = String(count));
+    const count = isLoggedIn() ? cart.reduce((s, i) => s + i.qty, 0) : 0;
+    document.querySelectorAll('[data-cart-badge]').forEach((el) => {
+      el.textContent = String(count);
+      el.classList.toggle('hidden', count === 0);
+    });
   }
 
   function updateFavoritesBadge() {

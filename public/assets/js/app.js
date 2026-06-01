@@ -216,6 +216,104 @@
     return getSessionType() === SessionType.USER ? currentUser.id : null;
   }
 
+  function isLoggedIn() {
+    return getSessionType() === SessionType.USER;
+  }
+
+  function authReturnPath() {
+    const path = location.pathname.split('/').pop() || 'index.html';
+    const qs = location.search || '';
+    const dest = path + qs;
+    if (dest.endsWith('.html') && !dest.includes('..')) return dest;
+    return 'index.html';
+  }
+
+  function authGateUrl(intent) {
+    const ret = intent === 'checkout' ? 'checkout.html' : authReturnPath();
+    return `auth.html?return=${encodeURIComponent(ret)}&intent=${encodeURIComponent(intent || 'save')}`;
+  }
+
+  const AUTH_GATE_COPY = {
+    cart: {
+      title: 'Sign in to add to cart',
+      pageTitle: 'Sign in to view your cart',
+      body: 'Create a free account or sign in to save items to your cart and complete checkout securely.',
+      icon: 'shopping_bag',
+    },
+    favorites: {
+      title: 'Sign in to save favourites',
+      pageTitle: 'Sign in to see your favourites',
+      body: 'Create a free account or sign in to keep your favourite blooms synced across devices.',
+      icon: 'favorite',
+    },
+    checkout: {
+      title: 'Sign in to checkout',
+      pageTitle: 'Sign in to complete checkout',
+      body: 'Create a free account or sign in to review your cart and place your order securely.',
+      icon: 'lock',
+    },
+  };
+
+  function loginRequiredHTML(feature) {
+    const copy = AUTH_GATE_COPY[feature] || AUTH_GATE_COPY.cart;
+    const pageTitle = copy.pageTitle || copy.title;
+    return `
+      <div class="text-center py-16 md:py-20 reveal max-w-md mx-auto">
+        <span class="material-symbols-outlined text-6xl text-primary/35 mb-5 block">${copy.icon}</span>
+        <h2 class="font-display text-headline-md text-on-surface mb-3">${pageTitle}</h2>
+        <p class="text-on-surface-variant mb-8 leading-relaxed">${copy.body}</p>
+        <a class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition inline-block" href="${authGateUrl(feature)}">Sign in or create account</a>
+        <p class="text-sm text-on-surface-variant mt-6"><a href="shop.html" class="text-primary hover:underline font-label text-label-sm">Continue browsing</a></p>
+      </div>`;
+  }
+
+  function bindAuthGateEvents() {
+    const gate = document.getElementById('authGate');
+    if (!gate) return;
+    const close = () => {
+      gate.hidden = true;
+    };
+    gate.querySelector('[data-auth-gate-close]')?.addEventListener('click', close);
+    gate.querySelector('.auth-gate__backdrop')?.addEventListener('click', close);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !gate.hidden) close();
+    });
+  }
+
+  function openAuthGate(intent) {
+    const copy = AUTH_GATE_COPY[intent] || AUTH_GATE_COPY.cart;
+    let gate = document.getElementById('authGate');
+    if (!gate) {
+      gate = document.createElement('div');
+      gate.id = 'authGate';
+      gate.className = 'auth-gate';
+      gate.hidden = true;
+      document.body.appendChild(gate);
+    }
+    gate.innerHTML = `
+      <div class="auth-gate__backdrop" aria-hidden="true"></div>
+      <div class="auth-gate__panel" role="dialog" aria-modal="true" aria-labelledby="authGateTitle">
+        <button type="button" class="auth-gate__close" data-auth-gate-close aria-label="Close">
+          <span class="material-symbols-outlined text-[22px]">close</span>
+        </button>
+        <div class="text-center">
+          <span class="material-symbols-outlined text-5xl text-primary/40 mb-4 block">${copy.icon}</span>
+          <h2 id="authGateTitle" class="font-display text-2xl text-primary mb-3">${copy.title}</h2>
+          <p class="text-on-surface-variant text-sm leading-relaxed mb-8">${copy.body}</p>
+          <a href="${authGateUrl(intent)}" class="block w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition mb-3">Sign in or create account</a>
+          <button type="button" class="w-full text-on-surface-variant text-sm hover:text-primary transition font-label text-label-sm" data-auth-gate-close>Continue browsing</button>
+        </div>
+      </div>`;
+    bindAuthGateEvents();
+    gate.hidden = false;
+  }
+
+  function requireLogin(intent) {
+    if (isLoggedIn()) return true;
+    openAuthGate(intent);
+    return false;
+  }
+
   function cartStorageKey() {
     return getSessionType() === SessionType.USER ? userCartKey(currentUser.id) : CART_GUEST;
   }
@@ -347,6 +445,7 @@
   }
 
   function persistCart() {
+    if (!isLoggedIn()) return;
     cart = dedupeCartLines(cart);
     if (productsLoaded) cart = enrichCartLines(cart);
     Store.set(cartStorageKey(), cart);
@@ -449,6 +548,7 @@
   let favoritesServerSynced = false;
 
   function saveFavoritesLocal() {
+    if (!isLoggedIn()) return;
     favorites = mergeFavoriteIds(favorites);
     Store.set(favoritesStorageKey(), favorites);
     Store.set('favorites', favorites);
@@ -981,6 +1081,7 @@
   }
 
   function toggleFavorite(id) {
+    if (!requireLogin('favorites')) return false;
     const n = Number(id);
     const i = favorites.findIndex((f) => Number(f) === n);
     if (i >= 0) favorites.splice(i, 1);
@@ -991,6 +1092,7 @@
     document.querySelectorAll('[data-fav="' + n + '"]').forEach((btn) => setFavoriteButtonState(btn, isFavorite(n)));
     renderFavoritesIfOnPage();
     toast(i >= 0 ? 'Removed from favourites' : 'Saved to favourites');
+    return true;
   }
 
   function formatCartOpts(opts) {
@@ -1118,8 +1220,9 @@
   }
 
   function addToCart(id, qty, opts) {
+    if (!requireLogin('cart')) return false;
     const p = products.find(x => x.id === id);
-    if (!p) return;
+    if (!p) return false;
     const price = calcPrice(p, opts || {});
     const lineOpts = opts || {};
     const key = cartItemKey({ id, opts: lineOpts });
@@ -1131,6 +1234,7 @@
     persistCart();
     updateCartBadge();
     toast('Added to your collection');
+    return true;
   }
 
   function productCardHTML(p, eager) {
@@ -1442,7 +1546,7 @@
     if (addBtn) addBtn.addEventListener('click', () => {
       const el = document.getElementById('cardMsg');
       if (el) detailState.opts.msg = el.value;
-      addToCart(p.id, detailState.qty, { ...detailState.opts });
+      if (!addToCart(p.id, detailState.qty, { ...detailState.opts })) return;
       setTimeout(() => location.href = 'cart.html', 600);
     });
     bindCardAddButtons(document.getElementById('completeGrid'));
@@ -1536,7 +1640,13 @@
 
   async function initCart() {
     const el = document.getElementById('cartContent');
-    if (el) el.innerHTML = loadingHTML('Loading your cart...');
+    if (!el) return;
+    if (!isLoggedIn()) {
+      el.innerHTML = loginRequiredHTML('cart');
+      applyReveal();
+      return;
+    }
+    el.innerHTML = loadingHTML('Loading your cart...');
     await ensureCartReady();
     renderCart();
   }
@@ -1546,18 +1656,12 @@
   async function initCheckout() {
     const el = document.getElementById('checkoutContent');
     if (!el) return;
-    if (currentUser && token) await ensureCartReady();
-    if (!currentUser) {
-      el.innerHTML = `
-        <div class="text-center py-16 reveal">
-          <span class="material-symbols-outlined text-5xl text-primary/40 mb-4">lock</span>
-          <h2 class="font-display text-headline-md text-on-surface mb-3">Login Required</h2>
-          <p class="text-on-surface-variant mb-6">You need an account to complete your purchase.</p>
-          <a class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition inline-block" href="auth.html?return=checkout.html">Login / Register</a>
-        </div>`;
+    if (!isLoggedIn()) {
+      el.innerHTML = loginRequiredHTML('checkout');
       applyReveal();
       return;
     }
+    await ensureCartReady();
     if (!cart.length) {
       el.innerHTML = `<div class="text-center py-16 reveal"><h2 class="font-display text-headline-md text-on-surface mb-3">Your cart is empty</h2><a class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest inline-block" href="shop.html">Shop Now</a></div>`;
       applyReveal();
@@ -2165,6 +2269,11 @@
   async function initFavorites() {
     const el = document.getElementById('favoritesContent');
     if (!el) return;
+    if (!isLoggedIn()) {
+      el.innerHTML = loginRequiredHTML('favorites');
+      applyReveal();
+      return;
+    }
     const needsLoad = !favoritesServerSynced && getSessionType() === SessionType.USER;
     if (needsLoad) el.innerHTML = loadingHTML('Loading favourites...');
     try {
@@ -2429,13 +2538,9 @@
   }
 
   async function syncGuestCartAndFavorites() {
-    repairCorruptedCartStorage();
-    await ensureProducts().catch(() => {});
-    cart = enrichCartLines(dedupeCartLines(Store.get(CART_GUEST, []) || Store.get('cart', [])));
-    persistCart();
+    cart = [];
+    favorites = [];
     updateCartBadge();
-    favorites = mergeFavoriteIds(readLocalFavorites());
-    saveFavoritesLocal();
     updateFavoritesBadge();
     syncFavoriteIcons();
   }

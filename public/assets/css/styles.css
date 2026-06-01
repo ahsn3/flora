@@ -58,6 +58,37 @@ body.menu-open { overflow: hidden; }
 }
 .toast.show { transform: translate(-50%, 0); opacity: 1; }
 
+/* Sign-in gate (cart / favourites) */
+.auth-gate {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.25rem;
+}
+.auth-gate[hidden] { display: none !important; }
+.auth-gate__backdrop {
+  position: absolute; inset: 0;
+  background: rgba(30, 27, 24, 0.45);
+  backdrop-filter: blur(4px);
+}
+.auth-gate__panel {
+  position: relative; width: 100%; max-width: 420px;
+  background: #fff8f5;
+  border-radius: 1.25rem;
+  padding: 2rem 1.75rem 1.75rem;
+  box-shadow: 0 24px 48px rgba(98, 20, 40, 0.2);
+  border: 1px solid rgba(218, 192, 195, 0.6);
+  animation: pageFade .35s ease both;
+}
+.auth-gate__close {
+  position: absolute; top: 1rem; right: 1rem;
+  width: 2.25rem; height: 2.25rem;
+  border-radius: 9999px;
+  display: flex; align-items: center; justify-content: center;
+  color: #5c4a42;
+  transition: background .2s ease, color .2s ease;
+}
+.auth-gate__close:hover { background: rgba(98, 20, 40, 0.08); color: #621428; }
+
 /* Nav active state */
 .nav-link.is-active, .drawer-link.is-active { color: #621428; font-weight: 700; }
 

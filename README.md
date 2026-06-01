@@ -12,7 +12,7 @@ An artisanal botanical boutique — full-stack web app with a refined Material 3
 - **Favourites** — saved products in `localStorage`
 - **Password reset** — email PIN flow for forgotten passwords
 - **Live admin dashboard** — stats, orders (with status updates), reservations, users, and product CRUD
-- **Persistent shopping cart** in `localStorage` (survives reloads, anonymous-friendly)
+- **Per-user cart & favourites** — guests use browser storage; logged-in users sync to Postgres (`user_carts`, `user_favorites`) via `/api/cart` and `/api/favorites`
 - **Bookmarkable URLs** — e.g. `product.html?id=3`
 - **Responsive layout** with a sliding mobile drawer
 - **Polished motion** — page fade-in, scroll-reveal, card shine, ambient floating blooms
@@ -80,6 +80,10 @@ flora-gifts/
 | DELETE | `/api/products/:id`               | admin  | Delete product                         |
 | GET    | `/api/orders`                     | user   | My orders                              |
 | POST   | `/api/orders`                     | user   | Place order                            |
+| GET    | `/api/cart`                       | user   | My saved cart (`type: user`)           |
+| PUT    | `/api/cart`                       | user   | Save cart items                        |
+| GET    | `/api/favorites`                  | user   | My favourite product IDs               |
+| PUT    | `/api/favorites`                  | user   | Save favourite product IDs             |
 | GET    | `/api/reservations/dates`         | —      | List booked dates (conflict check)     |
 | POST   | `/api/reservations`               | —      | Submit reservation inquiry             |
 | GET    | `/api/admin/stats`                | admin  | Dashboard counts + revenue             |
@@ -131,6 +135,8 @@ psql "$DATABASE_URL" -f db/schema.sql
 | `contact_messages` | Contact form submissions |
 | `products` | Catalogue items (price, stock, images, gallery JSON) |
 | `orders` | Placed orders linked to `users` |
+| `user_carts` | One cart per user (`items` JSON) |
+| `user_favorites` | Saved product IDs per user |
 | `reservations` | Event date bookings and inquiries |
 
 Relationships: `orders.user_id` → `users.id` (ON DELETE SET NULL).

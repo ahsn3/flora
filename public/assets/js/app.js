@@ -205,6 +205,25 @@
   const KEY = 'flora.';
   const CART_GUEST = 'cartGuest';
   const FAV_GUEST = 'favoritesGuest';
+  /** @type {{ GUEST: 'guest', USER: 'user' }} */
+  const SessionType = Object.freeze({ GUEST: 'guest', USER: 'user' });
+
+  function getSessionType() {
+    return currentUser && currentUser.id && token ? SessionType.USER : SessionType.GUEST;
+  }
+
+  function getSessionUserId() {
+    return getSessionType() === SessionType.USER ? currentUser.id : null;
+  }
+
+  function cartStorageKey() {
+    return getSessionType() === SessionType.USER ? userCartKey(currentUser.id) : CART_GUEST;
+  }
+
+  function favoritesStorageKey() {
+    return getSessionType() === SessionType.USER ? userFavoritesKey(currentUser.id) : FAV_GUEST;
+  }
+
   const Store = {
     get(k, fb) { try { const v = localStorage.getItem(KEY + k); return v ? JSON.parse(v) : fb; } catch { return fb; } },
     set(k, v) { try { localStorage.setItem(KEY + k, JSON.stringify(v)); } catch {} },
@@ -257,7 +276,7 @@
         const stock = Math.max(0, Number(p.stock) || 0);
         if (productsLoaded && stock === 0) return null;
         if (stock > 0) item.qty = Math.min(item.qty, stock);
-      } else if (productsLoaded && products.length) {
+      } else if (productsLoaded && products.length && !item.name) {
         return null;
       }
       return item.qty > 0 ? item : null;
@@ -278,21 +297,27 @@
     return Array.from(map.values());
   }
 
+  function migrateLegacyCartToSession() {
+    const legacy = Store.get('cart', []);
+    if (!legacy.length) return;
+    const key = cartStorageKey();
+    const existing = Store.get(key, []);
+    const merged = reconcileCartSources(existing, legacy);
+    Store.set(key, merged);
+    Store.clear('cart');
+  }
+
+  function migrateLegacyFavoritesToSession() {
+    const legacy = Store.get('favorites', []);
+    if (!legacy.length) return;
+    const key = favoritesStorageKey();
+    const merged = mergeFavoriteIds(Store.get(key, []), legacy);
+    Store.set(key, merged);
+  }
+
   function readLocalCart() {
-    if (currentUser && currentUser.id) {
-      const userCart = Store.get(userCartKey(currentUser.id), null);
-      if (userCart && userCart.length) return userCart;
-      const legacy = Store.get('cart', []);
-      if (legacy.length) {
-        Store.set(userCartKey(currentUser.id), legacy);
-        Store.clear('cart');
-        return legacy;
-      }
-      return [];
-    }
-    const guest = Store.get(CART_GUEST, null);
-    if (guest && guest.length) return guest;
-    return Store.get('cart', []);
+    migrateLegacyCartToSession();
+    return Store.get(cartStorageKey(), []);
   }
 
   function loadGuestCart() {
@@ -301,14 +326,10 @@
 
   function persistCart() {
     cart = sanitizeCart(cart);
-    if (currentUser && currentUser.id) {
-      Store.set(userCartKey(currentUser.id), cart);
-      Store.clear('cart');
-    } else {
-      Store.set(CART_GUEST, cart);
-      Store.set('cart', cart);
-    }
-    if (currentUser && token) {
+    Store.set(cartStorageKey(), cart);
+    if (getSessionType() === SessionType.USER) Store.clear('cart');
+    else Store.set('cart', cart);
+    if (getSessionType() === SessionType.USER) {
       Api.saveCart({ items: cart }).catch(() => {});
     }
   }
@@ -335,23 +356,13 @@
   }
 
   function readLocalFavorites() {
-    if (currentUser && currentUser.id) {
-      const userFavs = Store.get(userFavoritesKey(currentUser.id), null);
-      if (userFavs && userFavs.length) return userFavs;
-      const legacy = Store.get('favorites', []);
-      if (legacy.length) {
-        Store.set(userFavoritesKey(currentUser.id), legacy);
-        return legacy;
-      }
-      return [];
-    }
-    const guest = Store.get(FAV_GUEST, null);
-    if (guest && guest.length) return guest;
-    return Store.get('favorites', []);
+    migrateLegacyFavoritesToSession();
+    return Store.get(favoritesStorageKey(), []);
   }
 
   function hydrateFavoritesFromLocal() {
     favorites = mergeFavoriteIds(readLocalFavorites());
+    Store.set(favoritesStorageKey(), favorites);
     Store.set('favorites', favorites);
   }
 
@@ -389,13 +400,10 @@
 
   function persistFavorites() {
     favorites = mergeFavoriteIds(favorites);
-    if (currentUser && currentUser.id) {
-      Store.set(userFavoritesKey(currentUser.id), favorites);
-    } else {
-      Store.set(FAV_GUEST, favorites);
-    }
+    Store.set(favoritesStorageKey(), favorites);
     Store.set('favorites', favorites);
-    if (currentUser && token) {
+    if (getSessionType() === SessionType.USER) Store.clear(FAV_GUEST);
+    if (getSessionType() === SessionType.USER) {
       Api.saveFavorites({ productIds: favorites }).catch(() => {});
     }
   }
@@ -799,21 +807,15 @@
   }
 
   function doLogout() {
-    if (currentUser && currentUser.id) {
-      Store.set(userCartKey(currentUser.id), cart);
-      Store.set(userFavoritesKey(currentUser.id), favorites);
-      if (token) {
-        Api.saveCart({ items: cart }).catch(() => {});
-        Api.saveFavorites({ productIds: favorites }).catch(() => {});
-      }
+    if (getSessionType() === SessionType.USER) {
+      persistCart();
+      persistFavorites();
     }
     token = null;
     currentUser = null;
-    cart = loadGuestCart();
-    Store.set('cart', cart);
+    cart = sanitizeCart(Store.get(CART_GUEST, []));
+    favorites = mergeFavoriteIds(Store.get(FAV_GUEST, []));
     updateCartBadge();
-    favorites = loadGuestFavorites();
-    Store.set('favorites', favorites);
     updateFavoritesBadge();
     syncFavoriteIcons();
     Store.clear('token');

@@ -545,30 +545,58 @@ app.post('/api/orders', auth(true), wrap(async (req, res) => {
   res.json(rowToOrder(rows[0], req.user.email));
 }));
 
+function cartLineKey(item) {
+  const opts = item.opts && typeof item.opts === 'object' ? item.opts : {};
+  return `${item.id}|${JSON.stringify(opts)}`;
+}
+
+function sanitizeCartItems(items) {
+  if (!Array.isArray(items)) return [];
+  const map = new Map();
+  for (const raw of items) {
+    const id = Number(raw.id);
+    if (!id || id < 1) continue;
+    const opts = raw.opts && typeof raw.opts === 'object' ? raw.opts : {};
+    const qty = Math.max(1, Math.min(99, Math.floor(Number(raw.qty) || 1)));
+    const item = {
+      id,
+      qty,
+      opts,
+      price: Number(raw.price) || 0,
+      name: String(raw.name || '').slice(0, 200),
+      image: raw.image ? String(raw.image).slice(0, 500) : null,
+    };
+    const key = cartLineKey(item);
+    const existing = map.get(key);
+    if (!existing) map.set(key, item);
+    else existing.qty = Math.max(existing.qty, qty);
+  }
+  return Array.from(map.values());
+}
+
 app.get('/api/cart', auth(true), wrap(async (req, res) => {
   const { rows } = await pool.query('SELECT items FROM user_carts WHERE user_id=$1', [req.user.id]);
-  const items = rows.length && Array.isArray(rows[0].items) ? rows[0].items : [];
-  res.json({ items });
+  const raw = rows.length && Array.isArray(rows[0].items) ? rows[0].items : [];
+  const items = sanitizeCartItems(raw);
+  await pool.query(
+    `INSERT INTO user_carts (user_id, items, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET items = EXCLUDED.items, updated_at = NOW()`,
+    [req.user.id, JSON.stringify(items)]
+  );
+  res.json({ items, type: 'user', userId: req.user.id });
 }));
 
 app.put('/api/cart', auth(true), wrap(async (req, res) => {
   const { items } = req.body || {};
   if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be an array' });
-  const safe = items.map((item) => ({
-    id: Number(item.id),
-    qty: Math.max(1, Math.min(99, Number(item.qty) || 1)),
-    opts: item.opts && typeof item.opts === 'object' ? item.opts : {},
-    price: Number(item.price) || 0,
-    name: String(item.name || '').slice(0, 200),
-    image: item.image ? String(item.image).slice(0, 500) : null,
-  })).filter((item) => item.id > 0);
+  const safe = sanitizeCartItems(items);
   await pool.query(
     `INSERT INTO user_carts (user_id, items, updated_at)
      VALUES ($1, $2, NOW())
      ON CONFLICT (user_id) DO UPDATE SET items = EXCLUDED.items, updated_at = NOW()`,
     [req.user.id, JSON.stringify(safe)]
   );
-  res.json({ ok: true, items: safe });
+  res.json({ ok: true, items: safe, type: 'user', userId: req.user.id });
 }));
 
 app.get('/api/favorites', auth(true), wrap(async (req, res) => {
@@ -576,7 +604,7 @@ app.get('/api/favorites', auth(true), wrap(async (req, res) => {
     'SELECT product_id FROM user_favorites WHERE user_id=$1 ORDER BY created_at ASC',
     [req.user.id]
   );
-  res.json({ productIds: rows.map((r) => r.product_id) });
+  res.json({ productIds: rows.map((r) => r.product_id), type: 'user', userId: req.user.id });
 }));
 
 app.put('/api/favorites', auth(true), wrap(async (req, res) => {
@@ -594,9 +622,9 @@ app.put('/api/favorites', auth(true), wrap(async (req, res) => {
         [req.user.id, ...validIds]
       );
     }
-    return res.json({ ok: true, productIds: validIds });
+    return res.json({ ok: true, productIds: validIds, type: 'user', userId: req.user.id });
   }
-  res.json({ ok: true, productIds: [] });
+  res.json({ ok: true, productIds: [], type: 'user', userId: req.user.id });
 }));
 
 app.get('/api/reservations/dates', wrap(async (req, res) => {

@@ -452,14 +452,37 @@ function rowToProduct(r) {
   };
 }
 
+function rowToProductSummary(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    tagline: r.tagline,
+    category: r.category,
+    price: parseFloat(r.price),
+    image: r.image,
+    stock: r.stock,
+    card: r.card_available,
+  };
+}
+
 app.get('/api/products', wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM products ORDER BY id ASC');
-  res.json(rows.map(rowToProduct));
+  const full = req.query.full === '1' || req.query.full === 'true';
+  if (full) {
+    const { rows } = await pool.query('SELECT * FROM products ORDER BY id ASC');
+    res.set('Cache-Control', 'private, max-age=30');
+    return res.json(rows.map(rowToProduct));
+  }
+  const { rows } = await pool.query(
+    'SELECT id, name, tagline, category, price, image, stock, card_available FROM products ORDER BY id ASC'
+  );
+  res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=300');
+  res.json(rows.map(rowToProductSummary));
 }));
 
 app.get('/api/products/:id', wrap(async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM products WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Product not found' });
+  res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
   res.json(rowToProduct(rows[0]));
 }));
 
@@ -711,7 +734,13 @@ app.delete('/api/admin/reservations/:id', auth(true), requireAdmin, wrap(async (
 }));
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
-app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
+const ASSETS_DIR = path.join(PUBLIC_DIR, 'assets');
+app.use('/assets', express.static(ASSETS_DIR, {
+  maxAge: NODE_ENV === 'production' ? '7d' : 0,
+  immutable: NODE_ENV === 'production',
+  etag: true,
+}));
+app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0, etag: true }));
 
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/')) return next();

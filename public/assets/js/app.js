@@ -257,7 +257,6 @@
   }
 
   async function loadCartForSession(user) {
-    await ensureProducts().catch(() => {});
     const guest = loadGuestCart();
     const localUser = user ? Store.get(userCartKey(user.id), []) : [];
     let serverItems = [];
@@ -347,6 +346,9 @@
   let currentUser = Store.get('user', null);
   let products = [];
   let productsLoaded = false;
+  let productsInflight = null;
+  const PRODUCTS_CACHE_TTL_MS = 5 * 60 * 1000;
+  const PAGES_NEED_PRODUCTS = new Set(['home', 'shop', 'product', 'cart', 'favorites', 'checkout', 'admin']);
 
   if (!token && currentUser) {
     currentUser = null;
@@ -397,7 +399,7 @@
     register: (body) => api('/api/auth/register', { method: 'POST', body }),
     login:    (body) => api('/api/auth/login',    { method: 'POST', body }),
     me:       ()     => api('/api/auth/me'),
-    products: ()     => api('/api/products'),
+    products: (full) => api('/api/products' + (full ? '?full=1' : '')),
     productById: (id) => api('/api/products/' + id),
     addProduct: (body) => api('/api/products', { method: 'POST', body }),
     deleteProduct: (id) => api('/api/products/' + id, { method: 'DELETE' }),
@@ -824,11 +826,77 @@
     </div>`;
   }
 
-  async function ensureProducts() {
-    if (productsLoaded) return products;
-    products = await Api.products();
-    productsLoaded = true;
-    return products;
+  function readProductsCache() {
+    try {
+      const raw = sessionStorage.getItem(KEY + 'productsCache');
+      if (!raw) return null;
+      const { at, data } = JSON.parse(raw);
+      if (Date.now() - at > PRODUCTS_CACHE_TTL_MS || !Array.isArray(data)) return null;
+      return data;
+    } catch { return null; }
+  }
+
+  function writeProductsCache(data) {
+    try {
+      sessionStorage.setItem(KEY + 'productsCache', JSON.stringify({ at: Date.now(), data }));
+    } catch {}
+  }
+
+  async function fetchProductsFromApi(full) {
+    return Api.products(!!full);
+  }
+
+  function refreshProductsInBackground(full) {
+    fetchProductsFromApi(full).then((data) => {
+      products = data;
+      productsLoaded = true;
+      writeProductsCache(data);
+    }).catch(() => {});
+  }
+
+  async function ensureProducts(opts = {}) {
+    const full = !!opts.full;
+    if (productsLoaded && !opts.force) return products;
+    if (!opts.force) {
+      const cached = readProductsCache();
+      if (cached && cached.length) {
+        products = cached;
+        productsLoaded = true;
+        refreshProductsInBackground(full);
+        return products;
+      }
+    }
+    if (productsInflight) return productsInflight;
+    productsInflight = fetchProductsFromApi(full).then((data) => {
+      products = data;
+      productsLoaded = true;
+      writeProductsCache(data);
+      return products;
+    }).finally(() => { productsInflight = null; });
+    return productsInflight;
+  }
+
+  async function ensureProductDetail(id) {
+    const existing = products.find((x) => x.id === id);
+    if (existing && existing.gallery) return existing;
+    const full = await Api.productById(id);
+    const idx = products.findIndex((x) => x.id === id);
+    if (idx >= 0) products[idx] = full;
+    else products.push(full);
+    return full;
+  }
+
+  function preloadImages(urls) {
+    for (const url of urls) {
+      if (!url) continue;
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = url;
+    }
+  }
+
+  function preloadProductThumbs(list, limit) {
+    preloadImages((list || []).slice(0, limit).map((p) => productThumbUrl(p.image)));
   }
 
   function calcPrice(p, opts) {
@@ -855,13 +923,13 @@
     toast('Added to your collection');
   }
 
-  function productCardHTML(p) {
-    const full = p.image || '';
-    const thumb = productThumbUrl(full);
+  function productCardHTML(p, eager) {
+    const thumb = productThumbUrl(p.image || '');
+    const loadAttr = eager ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
     return `
     <a href="product.html?id=${p.id}" class="product-card group bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-500 flex flex-col h-full border border-outline-variant/10 cursor-pointer reveal block">
       <div class="aspect-[4/5] overflow-hidden bg-surface-container-low relative">
-        <img alt="${p.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src="${thumb}" srcset="${thumb} 420w, ${full} 900w" sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw" width="400" height="500" loading="lazy" decoding="async"/>
+        <img alt="${p.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src="${thumb}" width="400" height="500" ${loadAttr} decoding="async"/>
         <button type="button" class="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-surface/90 backdrop-blur flex items-center justify-center shadow ${isFavorite(p.id) ? 'text-error' : 'text-on-surface-variant hover:text-error'}" data-fav="${p.id}" aria-pressed="${isFavorite(p.id) ? 'true' : 'false'}" aria-label="${isFavorite(p.id) ? 'Remove from favourites' : 'Add to favourites'}">
           <span class="material-symbols-outlined fav-icon text-[22px] ${isFavorite(p.id) ? 'is-active' : ''}">${isFavorite(p.id) ? 'favorite' : 'favorite_border'}</span>
         </button>
@@ -894,7 +962,9 @@
     grid.innerHTML = loadingHTML('Loading featured collection...');
     try {
       await ensureProducts();
-      grid.innerHTML = products.slice(0, 4).map(productCardHTML).join('');
+      const featured = products.slice(0, 4);
+      preloadProductThumbs(featured, 4);
+      grid.innerHTML = featured.map((p, i) => productCardHTML(p, i < 2)).join('');
       bindCardAddButtons(grid);
     } catch (e) {
       grid.innerHTML = errorHTML('Could not load products. ' + e.message);
@@ -939,6 +1009,7 @@
     if (grid) grid.innerHTML = loadingHTML('Loading collection...');
     try {
       await ensureProducts();
+      preloadProductThumbs(products, 12);
     } catch (e) {
       if (grid) grid.innerHTML = errorHTML('Could not load products. ' + e.message);
       return;
@@ -1176,8 +1247,7 @@
     const id = parseInt(new URLSearchParams(location.search).get('id'), 10);
     if (!id) { root.innerHTML = errorHTML('No product selected.'); return; }
     try {
-      await ensureProducts();
-      const p = products.find(x => x.id === id);
+      const p = await ensureProductDetail(id);
       if (!p) {
         root.innerHTML = `<div class="text-center py-16"><p class="text-on-surface-variant mb-4">Product not found.</p><a class="bg-primary text-on-primary px-6 py-3 rounded-full font-label text-label-sm uppercase tracking-widest" href="shop.html">Browse Collection</a></div>`;
         return;
@@ -1314,7 +1384,7 @@
           <div class="space-y-3 mb-5 max-h-72 overflow-y-auto">
             ${cart.map(i => `
               <div class="flex items-center gap-3 text-sm">
-                <img src="${i.image}" class="w-12 h-12 rounded-lg object-cover flex-shrink-0"/>
+                <img src="${productThumbUrl(i.image)}" class="w-12 h-12 rounded-lg object-cover flex-shrink-0" loading="lazy" decoding="async" width="48" height="48"/>
                 <div class="flex-1 min-w-0"><p class="truncate font-semibold">${i.name}</p><p class="text-xs text-on-surface-variant">×${i.qty}</p></div>
                 <span class="text-secondary font-semibold">${fmt(i.price * i.qty)}</span>
               </div>`).join('')}
@@ -1936,7 +2006,7 @@
           </div>
           <span class="bg-success-container text-success font-label text-label-sm px-3 py-1 rounded-full uppercase tracking-widest self-start">${o.status}</span>
         </div>
-        <div class="flex items-center gap-2 mb-4 flex-wrap">${o.items.map(i => `<img src="${i.image}" class="w-10 h-10 rounded-lg object-cover"/>`).join('')}</div>
+        <div class="flex items-center gap-2 mb-4 flex-wrap">${o.items.map(i => `<img src="${productThumbUrl(i.image)}" class="w-10 h-10 rounded-lg object-cover" loading="lazy" decoding="async" width="40" height="40"/>`).join('')}</div>
         <p class="font-display text-xl text-secondary">${fmt(o.total)} ${CURRENCY.code}</p>
       </div>`).join('')}</div>`;
     applyReveal();
@@ -1986,7 +2056,8 @@
             ? `<div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','User','Total','Date','Status'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${orders.slice(0,5).map(o => `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${o.id}</td><td class="px-4 py-3">${o.user || '—'}</td><td class="px-4 py-3 text-secondary font-semibold">${fmt(o.total)}</td><td class="px-4 py-3">${o.date}</td><td class="px-4 py-3"><span class="bg-success-container text-success px-2 py-1 rounded-full text-[10px] uppercase tracking-widest">${o.status}</span></td></tr>`).join('')}</tbody></table></div>`
             : '<p class="text-on-surface-variant">No orders yet.</p>'}`;
       } else if (adminSection === 'aproducts') {
-        await ensureProducts();
+        productsLoaded = false;
+        await ensureProducts({ full: true, force: true });
         el.innerHTML = `
           <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-6 mb-6">
             <h3 class="font-display text-xl text-primary mb-4">Add New Product</h3>
@@ -2015,6 +2086,7 @@
               stock: parseInt(document.getElementById('apStock').value, 10) || 10,
             });
             productsLoaded = false;
+            try { sessionStorage.removeItem(KEY + 'productsCache'); } catch {}
             toast('Product added');
             renderAdmin();
           } catch (e) { toast(e.message || 'Could not add product'); }
@@ -2024,6 +2096,7 @@
           try {
             await Api.deleteProduct(b.dataset.del);
             productsLoaded = false;
+            try { sessionStorage.removeItem(KEY + 'productsCache'); } catch {}
             toast('Product removed');
             renderAdmin();
           } catch (e) { toast(e.message || 'Could not remove'); }
@@ -2148,6 +2221,16 @@
     }
   }
 
+  function syncGuestCartAndFavorites() {
+    cart = loadGuestCart();
+    Store.set('cart', cart);
+    updateCartBadge();
+    favorites = loadGuestFavorites();
+    Store.set('favorites', favorites);
+    updateFavoritesBadge();
+    syncFavoriteIcons();
+  }
+
   async function boot() {
     injectLayout();
     setupDrawer();
@@ -2157,20 +2240,28 @@
     syncFavoriteIcons();
     applyReveal();
 
+    const page = document.body.dataset.page;
     const userBefore = currentUser ? currentUser.email : null;
-    await refreshSession().catch(() => {});
+    const needsProducts = PAGES_NEED_PRODUCTS.has(page);
+
+    const sessionTask = refreshSession().catch(() => {});
+    const productsTask = needsProducts ? ensureProducts().catch(() => []) : Promise.resolve(products);
+
+    await Promise.all([sessionTask, productsTask]);
+
     if (currentUser) {
-      await loadCartForSession(currentUser);
-      await loadFavoritesForSession(currentUser);
+      Promise.all([
+        loadCartForSession(currentUser),
+        loadFavoritesForSession(currentUser),
+      ]).then(() => {
+        updateCartBadge();
+        updateFavoritesBadge();
+        syncFavoriteIcons();
+      }).catch(() => {});
     } else {
-      cart = loadGuestCart();
-      Store.set('cart', cart);
-      updateCartBadge();
-      favorites = loadGuestFavorites();
-      Store.set('favorites', favorites);
-      updateFavoritesBadge();
-      syncFavoriteIcons();
+      syncGuestCartAndFavorites();
     }
+
     if (userBefore !== (currentUser ? currentUser.email : null)) {
       injectLayout();
       setupDrawer();
@@ -2180,7 +2271,6 @@
       updateFavoritesBadge();
     }
 
-    const page = document.body.dataset.page;
     const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites, profile:initProfile }[page];
     if (init) {
       try { await init(); }

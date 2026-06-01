@@ -446,6 +446,7 @@
 
   let favoritesSyncTimer = null;
   let favReadyPromise = null;
+  let favoritesServerSynced = false;
 
   function saveFavoritesLocal() {
     favorites = mergeFavoriteIds(favorites);
@@ -491,30 +492,33 @@
     Store.set(FAV_GUEST, []);
     saveFavoritesLocal();
     if (serverOk ? changed : getSessionType() === SessionType.USER) scheduleFavoritesSync();
+    favoritesServerSynced = true;
     updateFavoritesBadge();
     syncFavoriteIcons();
-    renderFavoritesIfOnPage();
+  }
+
+  function resetFavoritesSession() {
+    favoritesServerSynced = false;
+    favReadyPromise = null;
   }
 
   async function loadFavoritesForSession(user) {
-    await syncFavoritesFromServer(user);
+    resetFavoritesSession();
+    await ensureFavoritesReady({ forceServer: true });
   }
 
-  async function ensureFavoritesReady() {
-    if (favReadyPromise) return favReadyPromise;
+  async function ensureFavoritesReady(opts = {}) {
+    if (favReadyPromise && !opts.forceServer) return favReadyPromise;
     favReadyPromise = (async () => {
       hydrateFavoritesFromLocal();
       updateFavoritesBadge();
       syncFavoriteIcons();
-      if (getSessionType() === SessionType.USER && currentUser) {
+      const needsServer = opts.forceServer || !favoritesServerSynced;
+      if (needsServer && getSessionType() === SessionType.USER && currentUser) {
         await syncFavoritesFromServer(currentUser);
       }
     })();
-    try {
-      await favReadyPromise;
-    } finally {
-      favReadyPromise = null;
-    }
+    return favReadyPromise;
   }
 
   function renderFavoritesIfOnPage() {
@@ -925,6 +929,7 @@
       clearTimeout(favoritesSyncTimer);
       if (token) Api.saveFavorites({ productIds: favorites }).catch(() => {});
     }
+    resetFavoritesSession();
     token = null;
     currentUser = null;
     cart = sanitizeCart(Store.get(CART_GUEST, []));
@@ -1875,8 +1880,8 @@
           pendingRegistration = null;
           clearInterval(resendTimer);
           cartReadyPromise = null;
-          favReadyPromise = null;
-          await Promise.all([ensureCartReady(), ensureFavoritesReady()]);
+          resetFavoritesSession();
+          await Promise.all([ensureCartReady(), ensureFavoritesReady({ forceServer: true })]);
           toast('Welcome to Flora, ' + currentUser.name);
           setTimeout(() => location.href = authRedirectUrl(currentUser), 600);
         } catch (e) {
@@ -1923,8 +1928,8 @@
           token = result.token; currentUser = result.user;
           Store.set('token', token); Store.set('user', currentUser);
           cartReadyPromise = null;
-          favReadyPromise = null;
-          await Promise.all([ensureCartReady(), ensureFavoritesReady()]);
+          resetFavoritesSession();
+          await Promise.all([ensureCartReady(), ensureFavoritesReady({ forceServer: true })]);
           toast('Welcome back, ' + currentUser.name);
           setTimeout(() => location.href = authRedirectUrl(currentUser), 600);
         } else {
@@ -2160,12 +2165,11 @@
   async function initFavorites() {
     const el = document.getElementById('favoritesContent');
     if (!el) return;
-    el.innerHTML = loadingHTML('Loading favourites...');
+    const needsLoad = !favoritesServerSynced && getSessionType() === SessionType.USER;
+    if (needsLoad) el.innerHTML = loadingHTML('Loading favourites...');
     try {
-      await Promise.all([
-        ensureProducts().catch(() => {}),
-        ensureFavoritesReady(),
-      ]);
+      await ensureProducts().catch(() => {});
+      if (needsLoad) await ensureFavoritesReady();
       renderFavoritesInto(el);
     } catch (e) {
       el.innerHTML = errorHTML(e.message);
@@ -2448,10 +2452,6 @@
     const needsProducts = PAGES_NEED_PRODUCTS.has(page);
 
     await refreshSession().catch(() => {});
-
-    hydrateFavoritesFromLocal();
-    updateFavoritesBadge();
-    syncFavoriteIcons();
 
     const sessionWork = getSessionType() === SessionType.USER
       ? Promise.all([ensureCartReady(), ensureFavoritesReady()])

@@ -604,6 +604,7 @@ app.get('/api/favorites', auth(true), wrap(async (req, res) => {
     'SELECT product_id FROM user_favorites WHERE user_id=$1 ORDER BY created_at ASC',
     [req.user.id]
   );
+  res.set('Cache-Control', 'private, max-age=30');
   res.json({ productIds: rows.map((r) => r.product_id), type: 'user', userId: req.user.id });
 }));
 

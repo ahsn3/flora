@@ -422,7 +422,7 @@
   function notifyFavoritesChanged() {
     updateFavoritesBadge();
     syncFavoriteIcons();
-    if (document.body.dataset.page === 'favorites') initFavorites();
+    renderFavoritesIfOnPage();
   }
 
   function userFavoritesKey(userId) {
@@ -444,30 +444,96 @@
     return readLocalFavorites();
   }
 
-  function persistFavorites() {
+  let favoritesSyncTimer = null;
+  let favReadyPromise = null;
+
+  function saveFavoritesLocal() {
     favorites = mergeFavoriteIds(favorites);
     Store.set(favoritesStorageKey(), favorites);
     Store.set('favorites', favorites);
     if (getSessionType() === SessionType.USER) Store.clear(FAV_GUEST);
-    if (getSessionType() === SessionType.USER) {
-      Api.saveFavorites({ productIds: favorites }).catch(() => {});
-    }
   }
 
-  async function loadFavoritesForSession(user) {
+  function scheduleFavoritesSync() {
+    if (getSessionType() !== SessionType.USER || !token) return;
+    clearTimeout(favoritesSyncTimer);
+    favoritesSyncTimer = setTimeout(() => {
+      Api.saveFavorites({ productIds: favorites }).catch(() => {});
+    }, 350);
+  }
+
+  function persistFavorites() {
+    saveFavoritesLocal();
+    scheduleFavoritesSync();
+  }
+
+  function favoritesSignature(ids) {
+    return mergeFavoriteIds(ids).slice().sort((a, b) => a - b).join(',');
+  }
+
+  async function syncFavoritesFromServer(user) {
     const guest = mergeFavoriteIds(Store.get(FAV_GUEST, []));
     const local = mergeFavoriteIds(Store.get(userFavoritesKey(user.id), []));
     let serverIds = [];
+    let serverOk = false;
     if (user && token) {
       try {
         const r = await Api.getFavorites();
-        serverIds = r.productIds || [];
+        serverIds = mergeFavoriteIds(r.productIds || []);
+        serverOk = true;
       } catch {}
     }
-    favorites = mergeFavoriteIds(local, serverIds, guest);
+    const merged = serverOk
+      ? mergeFavoriteIds(serverIds, guest)
+      : mergeFavoriteIds(local, guest);
+    const changed = favoritesSignature(favorites) !== favoritesSignature(merged);
+    favorites = merged;
     Store.set(FAV_GUEST, []);
-    persistFavorites();
-    notifyFavoritesChanged();
+    saveFavoritesLocal();
+    if (serverOk ? changed : getSessionType() === SessionType.USER) scheduleFavoritesSync();
+    updateFavoritesBadge();
+    syncFavoriteIcons();
+    renderFavoritesIfOnPage();
+  }
+
+  async function loadFavoritesForSession(user) {
+    await syncFavoritesFromServer(user);
+  }
+
+  async function ensureFavoritesReady() {
+    if (favReadyPromise) return favReadyPromise;
+    favReadyPromise = (async () => {
+      hydrateFavoritesFromLocal();
+      updateFavoritesBadge();
+      syncFavoriteIcons();
+      if (getSessionType() === SessionType.USER && currentUser) {
+        await syncFavoritesFromServer(currentUser);
+      }
+    })();
+    try {
+      await favReadyPromise;
+    } finally {
+      favReadyPromise = null;
+    }
+  }
+
+  function renderFavoritesIfOnPage() {
+    if (document.body.dataset.page !== 'favorites') return;
+    const el = document.getElementById('favoritesContent');
+    if (!el) return;
+    renderFavoritesInto(el);
+  }
+
+  function renderFavoritesInto(el) {
+    const list = products.filter((p) => isFavorite(p.id));
+    if (!list.length) {
+      el.innerHTML = `<div class="text-center py-16 reveal"><span class="material-symbols-outlined text-6xl text-primary/30 mb-4">favorite</span><p class="text-on-surface-variant mb-6">No favourites yet — tap the heart on any product.</p><a href="shop.html" class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest">Browse shop</a></div>`;
+    } else {
+      el.innerHTML = `<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-gutter">${list.map(productCardHTML).join('')}</div>`;
+      bindCardAddButtons(el);
+      bindFavoriteButtons(el);
+    }
+    applyReveal();
   }
 
   function authRedirectUrl(user) {
@@ -855,7 +921,9 @@
   function doLogout() {
     if (getSessionType() === SessionType.USER) {
       persistCart();
-      persistFavorites();
+      saveFavoritesLocal();
+      clearTimeout(favoritesSyncTimer);
+      if (token) Api.saveFavorites({ productIds: favorites }).catch(() => {});
     }
     token = null;
     currentUser = null;
@@ -912,9 +980,11 @@
     const i = favorites.findIndex((f) => Number(f) === n);
     if (i >= 0) favorites.splice(i, 1);
     else favorites.push(n);
-    persistFavorites();
+    saveFavoritesLocal();
+    scheduleFavoritesSync();
     updateFavoritesBadge();
     document.querySelectorAll('[data-fav="' + n + '"]').forEach((btn) => setFavoriteButtonState(btn, isFavorite(n)));
+    renderFavoritesIfOnPage();
     toast(i >= 0 ? 'Removed from favourites' : 'Saved to favourites');
   }
 
@@ -1805,8 +1875,8 @@
           pendingRegistration = null;
           clearInterval(resendTimer);
           cartReadyPromise = null;
-          await ensureCartReady();
-          await loadFavoritesForSession(currentUser);
+          favReadyPromise = null;
+          await Promise.all([ensureCartReady(), ensureFavoritesReady()]);
           toast('Welcome to Flora, ' + currentUser.name);
           setTimeout(() => location.href = authRedirectUrl(currentUser), 600);
         } catch (e) {
@@ -1853,8 +1923,8 @@
           token = result.token; currentUser = result.user;
           Store.set('token', token); Store.set('user', currentUser);
           cartReadyPromise = null;
-          await ensureCartReady();
-          await loadFavoritesForSession(currentUser);
+          favReadyPromise = null;
+          await Promise.all([ensureCartReady(), ensureFavoritesReady()]);
           toast('Welcome back, ' + currentUser.name);
           setTimeout(() => location.href = authRedirectUrl(currentUser), 600);
         } else {
@@ -2092,27 +2162,14 @@
     if (!el) return;
     el.innerHTML = loadingHTML('Loading favourites...');
     try {
-      if (currentUser && token) {
-        await loadFavoritesForSession(currentUser).catch(() => {});
-      } else {
-        favorites = mergeFavoriteIds(readLocalFavorites());
-        persistFavorites();
-        updateFavoritesBadge();
-        syncFavoriteIcons();
-      }
-      await ensureProducts();
-      const list = products.filter(p => isFavorite(p.id));
-      if (!list.length) {
-        el.innerHTML = `<div class="text-center py-16 reveal"><span class="material-symbols-outlined text-6xl text-primary/30 mb-4">favorite</span><p class="text-on-surface-variant mb-6">No favourites yet — tap the heart on any product.</p><a href="shop.html" class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest">Browse shop</a></div>`;
-      } else {
-        el.innerHTML = `<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-gutter">${list.map(productCardHTML).join('')}</div>`;
-        bindCardAddButtons(el);
-        bindFavoriteButtons(el);
-      }
+      await Promise.all([
+        ensureProducts().catch(() => {}),
+        ensureFavoritesReady(),
+      ]);
+      renderFavoritesInto(el);
     } catch (e) {
       el.innerHTML = errorHTML(e.message);
     }
-    applyReveal();
   }
 
   async function initOrders() {
@@ -2374,7 +2431,7 @@
     persistCart();
     updateCartBadge();
     favorites = mergeFavoriteIds(readLocalFavorites());
-    persistFavorites();
+    saveFavoritesLocal();
     updateFavoritesBadge();
     syncFavoriteIcons();
   }
@@ -2396,18 +2453,16 @@
     updateFavoritesBadge();
     syncFavoriteIcons();
 
-    if (needsProducts) await ensureProducts().catch(() => []);
+    const sessionWork = getSessionType() === SessionType.USER
+      ? Promise.all([ensureCartReady(), ensureFavoritesReady()])
+      : syncGuestCartAndFavorites();
 
-    if (getSessionType() === SessionType.USER) {
-      await ensureCartReady();
-      if (page === 'favorites') await loadFavoritesForSession(currentUser).catch(() => {});
-      else loadFavoritesForSession(currentUser).catch(() => {});
-    } else {
-      await syncGuestCartAndFavorites();
-    }
+    const productsWork = needsProducts ? ensureProducts().catch(() => []) : Promise.resolve();
+    await Promise.all([sessionWork, productsWork]);
 
     updateCartBadge();
     updateFavoritesBadge();
+    syncFavoriteIcons();
 
     if (userBefore !== (currentUser ? currentUser.email : null)) {
       injectLayout();

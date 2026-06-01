@@ -243,8 +243,8 @@
     return Math.max(1, Math.min(99, n));
   }
 
-  /** Normalize one cart list (dedupe lines; do not sum duplicate rows in the same array). */
-  function sanitizeCart(items) {
+  /** Dedupe lines only — never drops items based on catalog (safe before products load). */
+  function dedupeCartLines(items) {
     if (!Array.isArray(items)) return [];
     const map = new Map();
     for (const raw of items) {
@@ -267,43 +267,65 @@
         existing.qty = Math.max(existing.qty, qty);
       }
     }
-    return Array.from(map.values()).map((item) => {
+    return Array.from(map.values());
+  }
+
+  function enrichCartLines(items) {
+    return dedupeCartLines(items).map((item) => {
       const p = products.find((x) => x.id === item.id);
       if (p) {
         if (!item.name) item.name = p.name;
         if (!item.image) item.image = p.image;
         if (!item.price) item.price = p.price;
-        const stock = Math.max(0, Number(p.stock) || 0);
-        if (productsLoaded && stock === 0) return null;
+        const stock = Number(p.stock);
         if (stock > 0) item.qty = Math.min(item.qty, stock);
-      } else if (productsLoaded && products.length && !item.name) {
-        return null;
       }
-      return item.qty > 0 ? item : null;
-    }).filter(Boolean);
+      return item;
+    }).filter((item) => item.qty > 0 && item.id);
   }
 
-  /** Merge separate cart sources (local vs server) — take max qty per line, never add duplicates. */
+  function sanitizeCart(items) {
+    return enrichCartLines(items);
+  }
+
+  /** Merge sources for sync — max qty per line, never sum duplicates across copies. */
   function reconcileCartSources(...lists) {
     const map = new Map();
     for (const list of lists) {
-      for (const item of sanitizeCart(list)) {
+      for (const item of dedupeCartLines(list)) {
         const key = cartItemKey(item);
         const existing = map.get(key);
         if (!existing) map.set(key, { ...item });
         else existing.qty = Math.max(existing.qty, item.qty);
       }
     }
-    return Array.from(map.values());
+    return enrichCartLines(Array.from(map.values()));
+  }
+
+  function cartTotalQty(items) {
+    return (items || []).reduce((s, i) => s + clampQty(i.qty), 0);
+  }
+
+  function repairCorruptedCartStorage() {
+    const keys = getSessionType() === SessionType.USER && currentUser
+      ? [userCartKey(currentUser.id), 'cart', CART_GUEST]
+      : [CART_GUEST, 'cart'];
+    for (const k of keys) {
+      const raw = Store.get(k, []);
+      if (!raw.length) continue;
+      const deduped = dedupeCartLines(raw);
+      if (cartTotalQty(deduped) > 50 || deduped.length > 15) {
+        const repaired = deduped.slice(0, 10).map((i) => ({ ...i, qty: Math.min(3, i.qty) }));
+        Store.set(k, repaired);
+      }
+    }
   }
 
   function migrateLegacyCartToSession() {
     const legacy = Store.get('cart', []);
     if (!legacy.length) return;
     const key = cartStorageKey();
-    const existing = Store.get(key, []);
-    const merged = reconcileCartSources(existing, legacy);
-    Store.set(key, merged);
+    Store.set(key, reconcileCartSources(Store.get(key, []), legacy));
     Store.clear('cart');
   }
 
@@ -325,34 +347,58 @@
   }
 
   function persistCart() {
-    cart = sanitizeCart(cart);
+    cart = dedupeCartLines(cart);
+    if (productsLoaded) cart = enrichCartLines(cart);
     Store.set(cartStorageKey(), cart);
     if (getSessionType() === SessionType.USER) Store.clear('cart');
     else Store.set('cart', cart);
-    if (getSessionType() === SessionType.USER) {
+    if (getSessionType() === SessionType.USER && token) {
       Api.saveCart({ items: cart }).catch(() => {});
     }
   }
 
   async function loadCartForSession(user) {
     await ensureProducts().catch(() => {});
-    const guest = sanitizeCart(Store.get(CART_GUEST, []));
-    const local = sanitizeCart(Store.get(userCartKey(user.id), []));
+    const guest = dedupeCartLines(Store.get(CART_GUEST, []));
+    const local = dedupeCartLines(Store.get(userCartKey(user.id), []));
     let serverItems = [];
+    let serverOk = false;
     if (user && token) {
       try {
         const r = await Api.getCart();
-        serverItems = sanitizeCart(r.items || []);
+        serverItems = dedupeCartLines(r.items || []);
+        serverOk = true;
       } catch {}
     }
-    cart = reconcileCartSources(local, serverItems, guest);
+    cart = serverOk
+      ? reconcileCartSources(serverItems, guest)
+      : reconcileCartSources(local, guest);
     Store.set(CART_GUEST, []);
     persistCart();
     notifyCartChanged();
   }
 
-  function hydrateCartFromLocal() {
-    cart = sanitizeCart(readLocalCart());
+  let cartReadyPromise = null;
+
+  async function ensureCartReady() {
+    if (cartReadyPromise) return cartReadyPromise;
+    cartReadyPromise = (async () => {
+      repairCorruptedCartStorage();
+      migrateLegacyCartToSession();
+      await ensureProducts().catch(() => {});
+      if (getSessionType() === SessionType.USER && currentUser) {
+        await loadCartForSession(currentUser);
+      } else {
+        cart = enrichCartLines(dedupeCartLines(Store.get(CART_GUEST, []) || Store.get('cart', [])));
+        persistCart();
+        updateCartBadge();
+      }
+    })();
+    try {
+      await cartReadyPromise;
+    } finally {
+      cartReadyPromise = null;
+    }
   }
 
   function readLocalFavorites() {
@@ -1414,13 +1460,9 @@
   }
 
   async function initCart() {
-    try { await ensureProducts(); } catch {}
-    if (currentUser && token) {
-      try { await loadCartForSession(currentUser); } catch { cart = sanitizeCart(readLocalCart()); updateCartBadge(); }
-    } else {
-      cart = sanitizeCart(readLocalCart());
-      persistCart();
-    }
+    const el = document.getElementById('cartContent');
+    if (el) el.innerHTML = loadingHTML('Loading your cart...');
+    await ensureCartReady();
     renderCart();
   }
 
@@ -1429,6 +1471,7 @@
   async function initCheckout() {
     const el = document.getElementById('checkoutContent');
     if (!el) return;
+    if (currentUser && token) await ensureCartReady();
     if (!currentUser) {
       el.innerHTML = `
         <div class="text-center py-16 reveal">
@@ -1761,7 +1804,8 @@
           Store.set('token', token); Store.set('user', currentUser);
           pendingRegistration = null;
           clearInterval(resendTimer);
-          await loadCartForSession(currentUser);
+          cartReadyPromise = null;
+          await ensureCartReady();
           await loadFavoritesForSession(currentUser);
           toast('Welcome to Flora, ' + currentUser.name);
           setTimeout(() => location.href = authRedirectUrl(currentUser), 600);
@@ -1808,7 +1852,8 @@
           const result = await Api.login({ email, password: pass });
           token = result.token; currentUser = result.user;
           Store.set('token', token); Store.set('user', currentUser);
-          await loadCartForSession(currentUser);
+          cartReadyPromise = null;
+          await ensureCartReady();
           await loadFavoritesForSession(currentUser);
           toast('Welcome back, ' + currentUser.name);
           setTimeout(() => location.href = authRedirectUrl(currentUser), 600);
@@ -2322,8 +2367,10 @@
     }
   }
 
-  function syncGuestCartAndFavorites() {
-    cart = sanitizeCart(readLocalCart());
+  async function syncGuestCartAndFavorites() {
+    repairCorruptedCartStorage();
+    await ensureProducts().catch(() => {});
+    cart = enrichCartLines(dedupeCartLines(Store.get(CART_GUEST, []) || Store.get('cart', [])));
     persistCart();
     updateCartBadge();
     favorites = mergeFavoriteIds(readLocalFavorites());
@@ -2333,39 +2380,34 @@
   }
 
   async function boot() {
-    hydrateCartFromLocal();
-    hydrateFavoritesFromLocal();
-
     injectLayout();
     setupDrawer();
     setupProfileMenu();
     bindLogoutButtons();
-    updateCartBadge();
-    updateFavoritesBadge();
-    syncFavoriteIcons();
     applyReveal();
 
     const page = document.body.dataset.page;
     const userBefore = currentUser ? currentUser.email : null;
     const needsProducts = PAGES_NEED_PRODUCTS.has(page);
-    const needsCartSync = page === 'cart' || page === 'checkout';
-    const needsFavSync = page === 'favorites';
 
-    const sessionTask = refreshSession().catch(() => {});
-    const productsTask = needsProducts ? ensureProducts().catch(() => []) : Promise.resolve(products);
+    await refreshSession().catch(() => {});
 
-    await Promise.all([sessionTask, productsTask]);
+    hydrateFavoritesFromLocal();
+    updateFavoritesBadge();
+    syncFavoriteIcons();
 
-    if (currentUser) {
-      const cartTask = loadCartForSession(currentUser).catch(() => {});
-      const favTask = loadFavoritesForSession(currentUser).catch(() => {});
-      const wait = [];
-      if (needsCartSync) wait.push(cartTask);
-      if (needsFavSync) wait.push(favTask);
-      if (wait.length) await Promise.all(wait);
+    if (needsProducts) await ensureProducts().catch(() => []);
+
+    if (getSessionType() === SessionType.USER) {
+      await ensureCartReady();
+      if (page === 'favorites') await loadFavoritesForSession(currentUser).catch(() => {});
+      else loadFavoritesForSession(currentUser).catch(() => {});
     } else {
-      syncGuestCartAndFavorites();
+      await syncGuestCartAndFavorites();
     }
+
+    updateCartBadge();
+    updateFavoritesBadge();
 
     if (userBefore !== (currentUser ? currentUser.email : null)) {
       injectLayout();

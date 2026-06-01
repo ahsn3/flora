@@ -763,6 +763,7 @@ app.delete('/api/admin/reservations/:id', auth(true), requireAdmin, wrap(async (
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const ASSETS_DIR = path.join(PUBLIC_DIR, 'assets');
+app.use('/assets/js', express.static(path.join(ASSETS_DIR, 'js'), { maxAge: 0, etag: true }));
 app.use('/assets', express.static(ASSETS_DIR, {
   maxAge: NODE_ENV === 'production' ? '7d' : 0,
   immutable: NODE_ENV === 'production',

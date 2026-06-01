@@ -203,16 +203,146 @@
   };
 
   const KEY = 'flora.';
+  const CART_GUEST = 'cartGuest';
+  const FAV_GUEST = 'favoritesGuest';
   const Store = {
     get(k, fb) { try { const v = localStorage.getItem(KEY + k); return v ? JSON.parse(v) : fb; } catch { return fb; } },
     set(k, v) { try { localStorage.setItem(KEY + k, JSON.stringify(v)); } catch {} },
     clear(k) { try { localStorage.removeItem(KEY + k); } catch {} },
   };
 
-  let cart = Store.get('cart', []);
-  let favorites = Store.get('favorites', []);
-  favorites = favorites.map((id) => Number(id)).filter((id) => !Number.isNaN(id));
-  Store.set('favorites', favorites);
+  function userCartKey(userId) {
+    return `cart.${userId}`;
+  }
+
+  function cartItemKey(item) {
+    return `${item.id}|${JSON.stringify(item.opts || {})}`;
+  }
+
+  function mergeCartItems(...lists) {
+    const map = new Map();
+    for (const list of lists) {
+      for (const item of list || []) {
+        const key = cartItemKey(item);
+        const existing = map.get(key);
+        if (existing) existing.qty += item.qty;
+        else map.set(key, { ...item });
+      }
+    }
+    return Array.from(map.values()).map((item) => {
+      const p = products.find((x) => x.id === item.id);
+      if (p) item.qty = Math.min(item.qty, p.stock);
+      return item;
+    }).filter((item) => item.qty > 0);
+  }
+
+  function loadGuestCart() {
+    const guest = Store.get(CART_GUEST, null);
+    if (guest) return guest;
+    const legacy = Store.get('cart', []);
+    if (legacy.length) Store.set(CART_GUEST, legacy);
+    return legacy;
+  }
+
+  function persistCart() {
+    if (currentUser && currentUser.id) {
+      Store.set(userCartKey(currentUser.id), cart);
+    } else {
+      Store.set(CART_GUEST, cart);
+    }
+    Store.set('cart', cart);
+    if (currentUser && token) {
+      Api.saveCart({ items: cart }).catch(() => {});
+    }
+  }
+
+  async function loadCartForSession(user) {
+    await ensureProducts().catch(() => {});
+    const guest = loadGuestCart();
+    const localUser = user ? Store.get(userCartKey(user.id), []) : [];
+    let serverItems = [];
+    if (user && token) {
+      try {
+        const r = await Api.getCart();
+        serverItems = r.items || [];
+      } catch {}
+    }
+    cart = mergeCartItems(serverItems, localUser, guest);
+    Store.set(CART_GUEST, []);
+    if (user) Store.set(userCartKey(user.id), cart);
+    Store.set('cart', cart);
+    if (user && token) {
+      try { await Api.saveCart({ items: cart }); } catch {}
+    }
+    updateCartBadge();
+  }
+
+  function userFavoritesKey(userId) {
+    return `favorites.${userId}`;
+  }
+
+  function mergeFavoriteIds(...lists) {
+    const set = new Set();
+    for (const list of lists) {
+      for (const id of list || []) {
+        const n = Number(id);
+        if (!Number.isNaN(n) && n > 0) set.add(n);
+      }
+    }
+    return Array.from(set);
+  }
+
+  function loadGuestFavorites() {
+    const guest = Store.get(FAV_GUEST, null);
+    if (guest) return guest;
+    const legacy = Store.get('favorites', []);
+    if (legacy.length) Store.set(FAV_GUEST, legacy);
+    return legacy;
+  }
+
+  function persistFavorites() {
+    if (currentUser && currentUser.id) {
+      Store.set(userFavoritesKey(currentUser.id), favorites);
+    } else {
+      Store.set(FAV_GUEST, favorites);
+    }
+    Store.set('favorites', favorites);
+    if (currentUser && token) {
+      Api.saveFavorites({ productIds: favorites }).catch(() => {});
+    }
+  }
+
+  async function loadFavoritesForSession(user) {
+    const guest = loadGuestFavorites();
+    const localUser = user ? Store.get(userFavoritesKey(user.id), []) : [];
+    let serverIds = [];
+    if (user && token) {
+      try {
+        const r = await Api.getFavorites();
+        serverIds = r.productIds || [];
+      } catch {}
+    }
+    favorites = mergeFavoriteIds(serverIds, localUser, guest);
+    Store.set(FAV_GUEST, []);
+    if (user) Store.set(userFavoritesKey(user.id), favorites);
+    Store.set('favorites', favorites);
+    if (user && token) {
+      try { await Api.saveFavorites({ productIds: favorites }); } catch {}
+    }
+    updateFavoritesBadge();
+    syncFavoriteIcons();
+  }
+
+  function authRedirectUrl(user) {
+    if (user.role === 'admin') return 'admin.html';
+    const params = new URLSearchParams(location.search);
+    const dest = params.get('return');
+    if (dest && dest.endsWith('.html') && !dest.includes('..')) return dest;
+    return 'index.html';
+  }
+
+  let cart = [];
+  let favorites = [];
   let token = Store.get('token', null);
   let currentUser = Store.get('user', null);
   let products = [];
@@ -288,6 +418,10 @@
     forgotPassword: (body) => api('/api/auth/forgot-password', { method: 'POST', body }),
     resetPassword: (body) => api('/api/auth/reset-password', { method: 'POST', body }),
     submitContact: (body) => api('/api/contact', { method: 'POST', body }),
+    getCart: () => api('/api/cart'),
+    saveCart: (body) => api('/api/cart', { method: 'PUT', body }),
+    getFavorites: () => api('/api/favorites'),
+    saveFavorites: (body) => api('/api/favorites', { method: 'PUT', body }),
   };
 
   function userInitials(name) {
@@ -579,8 +713,23 @@
   }
 
   function doLogout() {
+    if (currentUser && currentUser.id) {
+      Store.set(userCartKey(currentUser.id), cart);
+      Store.set(userFavoritesKey(currentUser.id), favorites);
+      if (token) {
+        Api.saveCart({ items: cart }).catch(() => {});
+        Api.saveFavorites({ productIds: favorites }).catch(() => {});
+      }
+    }
     token = null;
     currentUser = null;
+    cart = loadGuestCart();
+    Store.set('cart', cart);
+    updateCartBadge();
+    favorites = loadGuestFavorites();
+    Store.set('favorites', favorites);
+    updateFavoritesBadge();
+    syncFavoriteIcons();
     Store.clear('token');
     Store.clear('user');
     toast('Logged out — see you again soon');
@@ -629,7 +778,7 @@
     const i = favorites.findIndex((f) => Number(f) === n);
     if (i >= 0) favorites.splice(i, 1);
     else favorites.push(n);
-    Store.set('favorites', favorites);
+    persistFavorites();
     updateFavoritesBadge();
     document.querySelectorAll('[data-fav="' + n + '"]').forEach((btn) => setFavoriteButtonState(btn, isFavorite(n)));
     toast(i >= 0 ? 'Removed from favourites' : 'Saved to favourites');
@@ -701,7 +850,7 @@
     const existing = cart.find(i => i.id === id && JSON.stringify(i.opts) === key);
     if (existing) existing.qty = Math.min(p.stock, existing.qty + qty);
     else cart.push({ id, qty, opts: opts || {}, price, name: p.name, image: p.image });
-    Store.set('cart', cart);
+    persistCart();
     updateCartBadge();
     toast('Added to your collection');
   }
@@ -1096,11 +1245,11 @@
       const p = products.find(x => x.id === cart[idx].id);
       const max = p ? p.stock : 99;
       cart[idx].qty = Math.max(1, Math.min(max, cart[idx].qty + d));
-      Store.set('cart', cart); updateCartBadge(); renderCart();
+      persistCart(); updateCartBadge(); renderCart();
     }));
     el.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => {
       cart.splice(parseInt(b.dataset.remove, 10), 1);
-      Store.set('cart', cart); updateCartBadge(); renderCart();
+      persistCart(); updateCartBadge(); renderCart();
     }));
     applyReveal();
   }
@@ -1123,7 +1272,7 @@
           <span class="material-symbols-outlined text-5xl text-primary/40 mb-4">lock</span>
           <h2 class="font-display text-headline-md text-on-surface mb-3">Login Required</h2>
           <p class="text-on-surface-variant mb-6">You need an account to complete your purchase.</p>
-          <a class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition inline-block" href="auth.html">Login / Register</a>
+          <a class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition inline-block" href="auth.html?return=checkout.html">Login / Register</a>
         </div>`;
       applyReveal();
       return;
@@ -1196,7 +1345,7 @@
           items: cart, total: subtotal + DELIVERY, address: addr, payment: checkoutState.pm,
         });
         cart = [];
-        Store.set('cart', cart);
+        persistCart();
         updateCartBadge();
         toast('Order placed — botanical poetry on its way ✿');
         setTimeout(() => location.href = 'orders.html', 800);
@@ -1449,8 +1598,10 @@
           Store.set('token', token); Store.set('user', currentUser);
           pendingRegistration = null;
           clearInterval(resendTimer);
+          await loadCartForSession(currentUser);
+          await loadFavoritesForSession(currentUser);
           toast('Welcome to Flora, ' + currentUser.name);
-          setTimeout(() => location.href = 'index.html', 600);
+          setTimeout(() => location.href = authRedirectUrl(currentUser), 600);
         } catch (e) {
           verifyBtn.disabled = false; verifyBtn.textContent = orig;
           toast(e.message || 'Verification failed');
@@ -1494,8 +1645,10 @@
           const result = await Api.login({ email, password: pass });
           token = result.token; currentUser = result.user;
           Store.set('token', token); Store.set('user', currentUser);
+          await loadCartForSession(currentUser);
+          await loadFavoritesForSession(currentUser);
           toast('Welcome back, ' + currentUser.name);
-          setTimeout(() => location.href = currentUser.role === 'admin' ? 'admin.html' : 'index.html', 600);
+          setTimeout(() => location.href = authRedirectUrl(currentUser), 600);
         } else {
           const name = document.getElementById('aName').value.trim();
           if (!name) { submit.disabled = false; submit.textContent = orig; toast('Please enter your name'); return; }
@@ -2000,23 +2153,32 @@
     setupDrawer();
     setupProfileMenu();
     bindLogoutButtons();
-    updateCartBadge();
     updateFavoritesBadge();
     syncFavoriteIcons();
     applyReveal();
 
     const userBefore = currentUser ? currentUser.email : null;
-    refreshSession().then(() => {
-      const userAfter = currentUser ? currentUser.email : null;
-      if (userBefore !== userAfter) {
-        injectLayout();
-        setupDrawer();
-        setupProfileMenu();
-        bindLogoutButtons();
-        updateCartBadge();
-        updateFavoritesBadge();
-      }
-    }).catch(() => {});
+    await refreshSession().catch(() => {});
+    if (currentUser) {
+      await loadCartForSession(currentUser);
+      await loadFavoritesForSession(currentUser);
+    } else {
+      cart = loadGuestCart();
+      Store.set('cart', cart);
+      updateCartBadge();
+      favorites = loadGuestFavorites();
+      Store.set('favorites', favorites);
+      updateFavoritesBadge();
+      syncFavoriteIcons();
+    }
+    if (userBefore !== (currentUser ? currentUser.email : null)) {
+      injectLayout();
+      setupDrawer();
+      setupProfileMenu();
+      bindLogoutButtons();
+      updateCartBadge();
+      updateFavoritesBadge();
+    }
 
     const page = document.body.dataset.page;
     const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites, profile:initProfile }[page];

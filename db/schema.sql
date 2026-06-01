@@ -1,6 +1,3 @@
--- Flora & Gifts — PostgreSQL schema
--- Usage: psql "$DATABASE_URL" -f db/schema.sql
-
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
@@ -69,6 +66,19 @@ CREATE TABLE IF NOT EXISTS reservations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS user_carts (
+  user_id INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  items JSONB NOT NULL DEFAULT '[]',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_favorites (
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, product_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
@@ -81,3 +91,5 @@ COMMENT ON TABLE contact_messages IS 'Messages submitted through the contact for
 COMMENT ON TABLE products IS 'Shop catalogue (flowers, gifts, wedding items)';
 COMMENT ON TABLE orders IS 'Customer purchase records';
 COMMENT ON TABLE reservations IS 'Event and venue reservation requests';
+COMMENT ON TABLE user_carts IS 'Per-user shopping cart (synced from client)';
+COMMENT ON TABLE user_favorites IS 'Per-user saved products';

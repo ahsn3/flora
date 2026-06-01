@@ -88,6 +88,17 @@ async function initDb() {
       notes TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS user_carts (
+      user_id INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      items JSONB NOT NULL DEFAULT '[]',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS user_favorites (
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, product_id)
+    );
   `);
 
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE`);
@@ -507,7 +518,62 @@ app.post('/api/orders', auth(true), wrap(async (req, res) => {
      VALUES ($1, $2, $3, $4, $5, 'Processing') RETURNING *`,
     [req.user.id, JSON.stringify(items), Number(total) || 0, address, payment || 'cash']
   );
+  await pool.query('DELETE FROM user_carts WHERE user_id=$1', [req.user.id]);
   res.json(rowToOrder(rows[0], req.user.email));
+}));
+
+app.get('/api/cart', auth(true), wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT items FROM user_carts WHERE user_id=$1', [req.user.id]);
+  const items = rows.length && Array.isArray(rows[0].items) ? rows[0].items : [];
+  res.json({ items });
+}));
+
+app.put('/api/cart', auth(true), wrap(async (req, res) => {
+  const { items } = req.body || {};
+  if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be an array' });
+  const safe = items.map((item) => ({
+    id: Number(item.id),
+    qty: Math.max(1, Math.min(99, Number(item.qty) || 1)),
+    opts: item.opts && typeof item.opts === 'object' ? item.opts : {},
+    price: Number(item.price) || 0,
+    name: String(item.name || '').slice(0, 200),
+    image: item.image ? String(item.image).slice(0, 500) : null,
+  })).filter((item) => item.id > 0);
+  await pool.query(
+    `INSERT INTO user_carts (user_id, items, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET items = EXCLUDED.items, updated_at = NOW()`,
+    [req.user.id, JSON.stringify(safe)]
+  );
+  res.json({ ok: true, items: safe });
+}));
+
+app.get('/api/favorites', auth(true), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    'SELECT product_id FROM user_favorites WHERE user_id=$1 ORDER BY created_at ASC',
+    [req.user.id]
+  );
+  res.json({ productIds: rows.map((r) => r.product_id) });
+}));
+
+app.put('/api/favorites', auth(true), wrap(async (req, res) => {
+  const { productIds } = req.body || {};
+  if (!Array.isArray(productIds)) return res.status(400).json({ error: 'productIds must be an array' });
+  const ids = [...new Set(productIds.map((id) => parseInt(id, 10)).filter((id) => id > 0))];
+  await pool.query('DELETE FROM user_favorites WHERE user_id=$1', [req.user.id]);
+  if (ids.length) {
+    const valid = await pool.query('SELECT id FROM products WHERE id = ANY($1::int[])', [ids]);
+    const validIds = valid.rows.map((r) => r.id);
+    if (validIds.length) {
+      const values = validIds.map((_, i) => `($1, $${i + 2})`).join(', ');
+      await pool.query(
+        `INSERT INTO user_favorites (user_id, product_id) VALUES ${values} ON CONFLICT DO NOTHING`,
+        [req.user.id, ...validIds]
+      );
+    }
+    return res.json({ ok: true, productIds: validIds });
+  }
+  res.json({ ok: true, productIds: [] });
 }));
 
 app.get('/api/reservations/dates', wrap(async (req, res) => {

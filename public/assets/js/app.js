@@ -273,7 +273,48 @@
     if (user && token) {
       try { await Api.saveCart({ items: cart }); } catch {}
     }
+    notifyCartChanged();
+  }
+
+  function hydrateCartFromLocal() {
+    const guest = loadGuestCart();
+    if (currentUser && currentUser.id) {
+      cart = mergeCartItems(
+        Store.get(userCartKey(currentUser.id), []),
+        Store.get('cart', []),
+        guest
+      );
+    } else {
+      cart = guest.length ? guest : Store.get('cart', []);
+    }
+    if (cart.length) Store.set('cart', cart);
+  }
+
+  function hydrateFavoritesFromLocal() {
+    const guest = loadGuestFavorites();
+    if (currentUser && currentUser.id) {
+      favorites = mergeFavoriteIds(
+        Store.get(userFavoritesKey(currentUser.id), []),
+        Store.get('favorites', []),
+        guest
+      );
+    } else {
+      favorites = guest.length ? guest : Store.get('favorites', []);
+    }
+    Store.set('favorites', favorites);
+  }
+
+  function notifyCartChanged() {
     updateCartBadge();
+    const page = document.body.dataset.page;
+    if (page === 'cart') renderCart();
+    if (page === 'checkout') initCheckout();
+  }
+
+  function notifyFavoritesChanged() {
+    updateFavoritesBadge();
+    syncFavoriteIcons();
+    if (document.body.dataset.page === 'favorites') initFavorites();
   }
 
   function userFavoritesKey(userId) {
@@ -328,8 +369,7 @@
     if (user && token) {
       try { await Api.saveFavorites({ productIds: favorites }); } catch {}
     }
-    updateFavoritesBadge();
-    syncFavoriteIcons();
+    notifyFavoritesChanged();
   }
 
   function authRedirectUrl(user) {
@@ -2138,153 +2178,4 @@
         adminCache.users = users;
         const myId = currentUser.id;
         el.innerHTML = `<p class="text-sm text-on-surface-variant mb-4">Manage accounts, roles, and access. You cannot delete your own account or the primary admin.</p>
-          <div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Verified','Role','Orders','Joined','Actions'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${users.length ? users.map(u => {
-            const isSelf = u.id === myId;
-            const isPrimary = u.email === 'admin@flora.com';
-            const canDelete = !isSelf && !isPrimary;
-            const canChangeRole = !isPrimary && !isSelf;
-            const roleCell = canChangeRole
-              ? `<select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-user-role="${u.id}"><option value="user" ${u.role==='user'?'selected':''}>user</option><option value="admin" ${u.role==='admin'?'selected':''}>admin</option></select>`
-              : `<span class="px-2 py-1 rounded-full text-[10px] uppercase tracking-widest ${u.role==='admin'?'bg-secondary-fixed text-on-secondary-container':'bg-primary-fixed text-primary'}">${u.role}</span>`;
-            const verified = u.email_verified
-              ? '<span class="text-success text-xs">Yes</span>'
-              : '<span class="text-on-surface-variant text-xs">No</span>';
-            const actions = canDelete
-              ? `<button type="button" class="text-error text-xs hover:underline" data-del-user="${u.id}">Remove</button>`
-              : '<span class="text-on-surface-variant text-xs">—</span>';
-            return `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${u.id}</td><td class="px-4 py-3">${u.name}</td><td class="px-4 py-3">${u.email}</td><td class="px-4 py-3">${verified}</td><td class="px-4 py-3">${roleCell}</td><td class="px-4 py-3">${u.order_count}</td><td class="px-4 py-3 text-xs text-on-surface-variant">${u.created_at ? new Date(u.created_at).toLocaleDateString('tr-TR') : ''}</td><td class="px-4 py-3">${actions}</td></tr>`;
-          }).join('') : '<tr><td colspan="8" class="text-center px-4 py-12 text-on-surface-variant">No users yet.</td></tr>'}</tbody></table></div>`;
-        el.querySelectorAll('[data-user-role]').forEach(sel => sel.addEventListener('change', async () => {
-          try {
-            await Api.adminUpdateUserRole(sel.dataset.userRole, sel.value);
-            toast('Role updated');
-            renderAdmin();
-          } catch (e) { toast(e.message || 'Could not update role'); }
-        }));
-        el.querySelectorAll('[data-del-user]').forEach(b => b.addEventListener('click', async () => {
-          if (!confirm('Remove this user permanently? Their orders will stay but no longer be linked to an account.')) return;
-          try {
-            await Api.adminDeleteUser(b.dataset.delUser);
-            toast('User removed');
-            renderAdmin();
-          } catch (e) { toast(e.message || 'Could not remove user'); }
-        }));
-      }
-    } catch (e) {
-
-      if (e.status === 401 || e.status === 403) {
-        el.innerHTML = `
-          <div class="text-center py-16 text-on-surface-variant">
-            <span class="material-symbols-outlined text-5xl text-primary/40 mb-3 block">lock</span>
-            <p class="mb-2">${e.status === 401 ? 'Your session has expired.' : 'Admin access required.'}</p>
-            <p class="text-sm mb-6">Please log in again to continue.</p>
-            <a class="bg-primary text-on-primary px-6 py-3 rounded-full text-sm uppercase tracking-widest" href="auth.html">Sign in</a>
-          </div>`;
-
-        injectLayout();
-        bindLogoutButtons();
-        return;
-      }
-      el.innerHTML = errorHTML(e.message || 'Could not load admin data.');
-    }
-  }
-
-  function initAdmin() {
-    document.querySelectorAll('.admin-tab').forEach(b => b.addEventListener('click', () => {
-      adminSection = b.dataset.section; renderAdmin();
-    }));
-    renderAdmin();
-  }
-
-  function injectLayout() {
-    const page = document.body.dataset.page || 'home';
-    const headEl = document.getElementById('site-nav');
-    const footEl = document.getElementById('site-footer');
-    const ambEl  = document.getElementById('site-ambient');
-    if (headEl) headEl.outerHTML = navHTML(page);
-    if (footEl) footEl.outerHTML = footerHTML();
-    if (ambEl)  ambEl.outerHTML  = ambientHTML();
-  }
-
-  async function refreshSession() {
-    if (!token) {
-
-      if (currentUser) { currentUser = null; Store.clear('user'); }
-      return;
-    }
-    try {
-      const { user } = await Api.me();
-      currentUser = user;
-      Store.set('user', currentUser);
-    } catch (e) {
-
-    }
-  }
-
-  function syncGuestCartAndFavorites() {
-    cart = loadGuestCart();
-    Store.set('cart', cart);
-    updateCartBadge();
-    favorites = loadGuestFavorites();
-    Store.set('favorites', favorites);
-    updateFavoritesBadge();
-    syncFavoriteIcons();
-  }
-
-  async function boot() {
-    injectLayout();
-    setupDrawer();
-    setupProfileMenu();
-    bindLogoutButtons();
-    updateFavoritesBadge();
-    syncFavoriteIcons();
-    applyReveal();
-
-    const page = document.body.dataset.page;
-    const userBefore = currentUser ? currentUser.email : null;
-    const needsProducts = PAGES_NEED_PRODUCTS.has(page);
-
-    const sessionTask = refreshSession().catch(() => {});
-    const productsTask = needsProducts ? ensureProducts().catch(() => []) : Promise.resolve(products);
-
-    await Promise.all([sessionTask, productsTask]);
-
-    if (currentUser) {
-      Promise.all([
-        loadCartForSession(currentUser),
-        loadFavoritesForSession(currentUser),
-      ]).then(() => {
-        updateCartBadge();
-        updateFavoritesBadge();
-        syncFavoriteIcons();
-      }).catch(() => {});
-    } else {
-      syncGuestCartAndFavorites();
-    }
-
-    if (userBefore !== (currentUser ? currentUser.email : null)) {
-      injectLayout();
-      setupDrawer();
-      setupProfileMenu();
-      bindLogoutButtons();
-      updateCartBadge();
-      updateFavoritesBadge();
-    }
-
-    const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites, profile:initProfile }[page];
-    if (init) {
-      try { await init(); }
-      catch (e) { console.error(e); toast(e.message || 'Page error'); }
-    }
-    bindLogoutButtons();
-    applyReveal();
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
-
-  window.Flora = { addToCart, fmt, toast, api };
-})();
+          <div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Verified','Role','Orders','Joined','Actions'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></t

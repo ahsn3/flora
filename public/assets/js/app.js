@@ -219,88 +219,139 @@
     return `${item.id}|${JSON.stringify(item.opts || {})}`;
   }
 
-  function mergeCartItems(...lists) {
+  function clampQty(q) {
+    const n = Math.floor(Number(q) || 0);
+    return Math.max(1, Math.min(99, n));
+  }
+
+  /** Normalize one cart list (dedupe lines; do not sum duplicate rows in the same array). */
+  function sanitizeCart(items) {
+    if (!Array.isArray(items)) return [];
     const map = new Map();
-    for (const list of lists) {
-      for (const item of list || []) {
-        const key = cartItemKey(item);
-        const existing = map.get(key);
-        if (existing) existing.qty += item.qty;
-        else map.set(key, { ...item });
+    for (const raw of items) {
+      const id = Number(raw.id);
+      if (!id || id < 1) continue;
+      const opts = raw.opts && typeof raw.opts === 'object' ? raw.opts : {};
+      const key = cartItemKey({ id, opts });
+      const qty = clampQty(raw.qty);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          id,
+          qty,
+          opts,
+          price: Number(raw.price) || 0,
+          name: String(raw.name || '').slice(0, 200),
+          image: raw.image || null,
+        });
+      } else {
+        existing.qty = Math.max(existing.qty, qty);
       }
     }
     return Array.from(map.values()).map((item) => {
       const p = products.find((x) => x.id === item.id);
-      if (p) item.qty = Math.min(item.qty, p.stock);
-      return item;
-    }).filter((item) => item.qty > 0);
+      if (p) {
+        if (!item.name) item.name = p.name;
+        if (!item.image) item.image = p.image;
+        if (!item.price) item.price = p.price;
+        const stock = Math.max(0, Number(p.stock) || 0);
+        if (productsLoaded && stock === 0) return null;
+        if (stock > 0) item.qty = Math.min(item.qty, stock);
+      } else if (productsLoaded && products.length) {
+        return null;
+      }
+      return item.qty > 0 ? item : null;
+    }).filter(Boolean);
+  }
+
+  /** Merge separate cart sources (local vs server) — take max qty per line, never add duplicates. */
+  function reconcileCartSources(...lists) {
+    const map = new Map();
+    for (const list of lists) {
+      for (const item of sanitizeCart(list)) {
+        const key = cartItemKey(item);
+        const existing = map.get(key);
+        if (!existing) map.set(key, { ...item });
+        else existing.qty = Math.max(existing.qty, item.qty);
+      }
+    }
+    return Array.from(map.values());
+  }
+
+  function readLocalCart() {
+    if (currentUser && currentUser.id) {
+      const userCart = Store.get(userCartKey(currentUser.id), null);
+      if (userCart && userCart.length) return userCart;
+      const legacy = Store.get('cart', []);
+      if (legacy.length) {
+        Store.set(userCartKey(currentUser.id), legacy);
+        Store.clear('cart');
+        return legacy;
+      }
+      return [];
+    }
+    const guest = Store.get(CART_GUEST, null);
+    if (guest && guest.length) return guest;
+    return Store.get('cart', []);
   }
 
   function loadGuestCart() {
-    const guest = Store.get(CART_GUEST, null);
-    if (guest) return guest;
-    const legacy = Store.get('cart', []);
-    if (legacy.length) Store.set(CART_GUEST, legacy);
-    return legacy;
+    return readLocalCart();
   }
 
   function persistCart() {
+    cart = sanitizeCart(cart);
     if (currentUser && currentUser.id) {
       Store.set(userCartKey(currentUser.id), cart);
+      Store.clear('cart');
     } else {
       Store.set(CART_GUEST, cart);
+      Store.set('cart', cart);
     }
-    Store.set('cart', cart);
     if (currentUser && token) {
       Api.saveCart({ items: cart }).catch(() => {});
     }
   }
 
   async function loadCartForSession(user) {
-    const guest = loadGuestCart();
-    const localUser = user ? Store.get(userCartKey(user.id), []) : [];
+    await ensureProducts().catch(() => {});
+    const guest = sanitizeCart(Store.get(CART_GUEST, []));
+    const local = sanitizeCart(Store.get(userCartKey(user.id), []));
     let serverItems = [];
     if (user && token) {
       try {
         const r = await Api.getCart();
-        serverItems = r.items || [];
+        serverItems = sanitizeCart(r.items || []);
       } catch {}
     }
-    cart = mergeCartItems(serverItems, localUser, guest);
+    cart = reconcileCartSources(local, serverItems, guest);
     Store.set(CART_GUEST, []);
-    if (user) Store.set(userCartKey(user.id), cart);
-    Store.set('cart', cart);
-    if (user && token) {
-      try { await Api.saveCart({ items: cart }); } catch {}
-    }
+    persistCart();
     notifyCartChanged();
   }
 
   function hydrateCartFromLocal() {
-    const guest = loadGuestCart();
+    cart = sanitizeCart(readLocalCart());
+  }
+
+  function readLocalFavorites() {
     if (currentUser && currentUser.id) {
-      cart = mergeCartItems(
-        Store.get(userCartKey(currentUser.id), []),
-        Store.get('cart', []),
-        guest
-      );
-    } else {
-      cart = guest.length ? guest : Store.get('cart', []);
+      const userFavs = Store.get(userFavoritesKey(currentUser.id), null);
+      if (userFavs && userFavs.length) return userFavs;
+      const legacy = Store.get('favorites', []);
+      if (legacy.length) {
+        Store.set(userFavoritesKey(currentUser.id), legacy);
+        return legacy;
+      }
+      return [];
     }
-    if (cart.length) Store.set('cart', cart);
+    const guest = Store.get(FAV_GUEST, null);
+    if (guest && guest.length) return guest;
+    return Store.get('favorites', []);
   }
 
   function hydrateFavoritesFromLocal() {
-    const guest = loadGuestFavorites();
-    if (currentUser && currentUser.id) {
-      favorites = mergeFavoriteIds(
-        Store.get(userFavoritesKey(currentUser.id), []),
-        Store.get('favorites', []),
-        guest
-      );
-    } else {
-      favorites = guest.length ? guest : Store.get('favorites', []);
-    }
+    favorites = mergeFavoriteIds(readLocalFavorites());
     Store.set('favorites', favorites);
   }
 
@@ -333,14 +384,11 @@
   }
 
   function loadGuestFavorites() {
-    const guest = Store.get(FAV_GUEST, null);
-    if (guest) return guest;
-    const legacy = Store.get('favorites', []);
-    if (legacy.length) Store.set(FAV_GUEST, legacy);
-    return legacy;
+    return readLocalFavorites();
   }
 
   function persistFavorites() {
+    favorites = mergeFavoriteIds(favorites);
     if (currentUser && currentUser.id) {
       Store.set(userFavoritesKey(currentUser.id), favorites);
     } else {
@@ -353,8 +401,8 @@
   }
 
   async function loadFavoritesForSession(user) {
-    const guest = loadGuestFavorites();
-    const localUser = user ? Store.get(userFavoritesKey(user.id), []) : [];
+    const guest = mergeFavoriteIds(Store.get(FAV_GUEST, []));
+    const local = mergeFavoriteIds(Store.get(userFavoritesKey(user.id), []));
     let serverIds = [];
     if (user && token) {
       try {
@@ -362,13 +410,9 @@
         serverIds = r.productIds || [];
       } catch {}
     }
-    favorites = mergeFavoriteIds(serverIds, localUser, guest);
+    favorites = mergeFavoriteIds(local, serverIds, guest);
     Store.set(FAV_GUEST, []);
-    if (user) Store.set(userFavoritesKey(user.id), favorites);
-    Store.set('favorites', favorites);
-    if (user && token) {
-      try { await Api.saveFavorites({ productIds: favorites }); } catch {}
-    }
+    persistFavorites();
     notifyFavoritesChanged();
   }
 
@@ -954,10 +998,13 @@
     const p = products.find(x => x.id === id);
     if (!p) return;
     const price = calcPrice(p, opts || {});
-    const key = JSON.stringify(opts || {});
-    const existing = cart.find(i => i.id === id && JSON.stringify(i.opts) === key);
-    if (existing) existing.qty = Math.min(p.stock, existing.qty + qty);
-    else cart.push({ id, qty, opts: opts || {}, price, name: p.name, image: p.image });
+    const lineOpts = opts || {};
+    const key = cartItemKey({ id, opts: lineOpts });
+    const existing = cart.find((i) => cartItemKey(i) === key);
+    const addQty = clampQty(qty);
+    const stock = Math.max(1, Number(p.stock) || 99);
+    if (existing) existing.qty = Math.min(stock, existing.qty + addQty);
+    else cart.push({ id, qty: Math.min(stock, addQty), opts: lineOpts, price, name: p.name, image: p.image });
     persistCart();
     updateCartBadge();
     toast('Added to your collection');
@@ -1365,8 +1412,12 @@
   }
 
   async function initCart() {
-    if (cart.length) {
-      try { await ensureProducts(); } catch {}
+    try { await ensureProducts(); } catch {}
+    if (currentUser && token) {
+      try { await loadCartForSession(currentUser); } catch { cart = sanitizeCart(readLocalCart()); updateCartBadge(); }
+    } else {
+      cart = sanitizeCart(readLocalCart());
+      persistCart();
     }
     renderCart();
   }
@@ -1994,6 +2045,14 @@
     if (!el) return;
     el.innerHTML = loadingHTML('Loading favourites...');
     try {
+      if (currentUser && token) {
+        await loadFavoritesForSession(currentUser).catch(() => {});
+      } else {
+        favorites = mergeFavoriteIds(readLocalFavorites());
+        persistFavorites();
+        updateFavoritesBadge();
+        syncFavoriteIcons();
+      }
       await ensureProducts();
       const list = products.filter(p => isFavorite(p.id));
       if (!list.length) {
@@ -2178,4 +2237,157 @@
         adminCache.users = users;
         const myId = currentUser.id;
         el.innerHTML = `<p class="text-sm text-on-surface-variant mb-4">Manage accounts, roles, and access. You cannot delete your own account or the primary admin.</p>
-          <div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Verified','Role','Orders','Joined','Actions'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></t
+          <div class="overflow-x-auto bg-surface-container-lowest rounded-xl border border-outline-variant/30"><table class="w-full text-sm"><thead class="bg-tertiary text-tertiary-fixed-dim"><tr>${['ID','Name','Email','Verified','Role','Orders','Joined','Actions'].map(h => `<th class="text-left px-4 py-3 font-label text-label-sm uppercase tracking-widest">${h}</th>`).join('')}</tr></thead><tbody>${users.length ? users.map(u => {
+            const isSelf = u.id === myId;
+            const isPrimary = u.email === 'admin@flora.com';
+            const canDelete = !isSelf && !isPrimary;
+            const canChangeRole = !isPrimary && !isSelf;
+            const roleCell = canChangeRole
+              ? `<select class="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 text-xs" data-user-role="${u.id}"><option value="user" ${u.role==='user'?'selected':''}>user</option><option value="admin" ${u.role==='admin'?'selected':''}>admin</option></select>`
+              : `<span class="px-2 py-1 rounded-full text-[10px] uppercase tracking-widest ${u.role==='admin'?'bg-secondary-fixed text-on-secondary-container':'bg-primary-fixed text-primary'}">${u.role}</span>`;
+            const verified = u.email_verified
+              ? '<span class="text-success text-xs">Yes</span>'
+              : '<span class="text-on-surface-variant text-xs">No</span>';
+            const actions = canDelete
+              ? `<button type="button" class="text-error text-xs hover:underline" data-del-user="${u.id}">Remove</button>`
+              : '<span class="text-on-surface-variant text-xs">—</span>';
+            return `<tr class="border-t border-outline-variant/20"><td class="px-4 py-3 font-mono text-xs">${u.id}</td><td class="px-4 py-3">${u.name}</td><td class="px-4 py-3">${u.email}</td><td class="px-4 py-3">${verified}</td><td class="px-4 py-3">${roleCell}</td><td class="px-4 py-3">${u.order_count}</td><td class="px-4 py-3 text-xs text-on-surface-variant">${u.created_at ? new Date(u.created_at).toLocaleDateString('tr-TR') : ''}</td><td class="px-4 py-3">${actions}</td></tr>`;
+          }).join('') : '<tr><td colspan="8" class="text-center px-4 py-12 text-on-surface-variant">No users yet.</td></tr>'}</tbody></table></div>`;
+        el.querySelectorAll('[data-user-role]').forEach(sel => sel.addEventListener('change', async () => {
+          try {
+            await Api.adminUpdateUserRole(sel.dataset.userRole, sel.value);
+            toast('Role updated');
+            renderAdmin();
+          } catch (e) { toast(e.message || 'Could not update role'); }
+        }));
+        el.querySelectorAll('[data-del-user]').forEach(b => b.addEventListener('click', async () => {
+          if (!confirm('Remove this user permanently? Their orders will stay but no longer be linked to an account.')) return;
+          try {
+            await Api.adminDeleteUser(b.dataset.delUser);
+            toast('User removed');
+            renderAdmin();
+          } catch (e) { toast(e.message || 'Could not remove user'); }
+        }));
+      }
+    } catch (e) {
+
+      if (e.status === 401 || e.status === 403) {
+        el.innerHTML = `
+          <div class="text-center py-16 text-on-surface-variant">
+            <span class="material-symbols-outlined text-5xl text-primary/40 mb-3 block">lock</span>
+            <p class="mb-2">${e.status === 401 ? 'Your session has expired.' : 'Admin access required.'}</p>
+            <p class="text-sm mb-6">Please log in again to continue.</p>
+            <a class="bg-primary text-on-primary px-6 py-3 rounded-full text-sm uppercase tracking-widest" href="auth.html">Sign in</a>
+          </div>`;
+
+        injectLayout();
+        bindLogoutButtons();
+        return;
+      }
+      el.innerHTML = errorHTML(e.message || 'Could not load admin data.');
+    }
+  }
+
+  function initAdmin() {
+    document.querySelectorAll('.admin-tab').forEach(b => b.addEventListener('click', () => {
+      adminSection = b.dataset.section; renderAdmin();
+    }));
+    renderAdmin();
+  }
+
+  function injectLayout() {
+    const page = document.body.dataset.page || 'home';
+    const headEl = document.getElementById('site-nav');
+    const footEl = document.getElementById('site-footer');
+    const ambEl  = document.getElementById('site-ambient');
+    if (headEl) headEl.outerHTML = navHTML(page);
+    if (footEl) footEl.outerHTML = footerHTML();
+    if (ambEl)  ambEl.outerHTML  = ambientHTML();
+  }
+
+  async function refreshSession() {
+    if (!token) {
+
+      if (currentUser) { currentUser = null; Store.clear('user'); }
+      return;
+    }
+    try {
+      const { user } = await Api.me();
+      currentUser = user;
+      Store.set('user', currentUser);
+    } catch (e) {
+
+    }
+  }
+
+  function syncGuestCartAndFavorites() {
+    cart = sanitizeCart(readLocalCart());
+    persistCart();
+    updateCartBadge();
+    favorites = mergeFavoriteIds(readLocalFavorites());
+    persistFavorites();
+    updateFavoritesBadge();
+    syncFavoriteIcons();
+  }
+
+  async function boot() {
+    hydrateCartFromLocal();
+    hydrateFavoritesFromLocal();
+
+    injectLayout();
+    setupDrawer();
+    setupProfileMenu();
+    bindLogoutButtons();
+    updateCartBadge();
+    updateFavoritesBadge();
+    syncFavoriteIcons();
+    applyReveal();
+
+    const page = document.body.dataset.page;
+    const userBefore = currentUser ? currentUser.email : null;
+    const needsProducts = PAGES_NEED_PRODUCTS.has(page);
+    const needsCartSync = page === 'cart' || page === 'checkout';
+    const needsFavSync = page === 'favorites';
+
+    const sessionTask = refreshSession().catch(() => {});
+    const productsTask = needsProducts ? ensureProducts().catch(() => []) : Promise.resolve(products);
+
+    await Promise.all([sessionTask, productsTask]);
+
+    if (currentUser) {
+      const cartTask = loadCartForSession(currentUser).catch(() => {});
+      const favTask = loadFavoritesForSession(currentUser).catch(() => {});
+      const wait = [];
+      if (needsCartSync) wait.push(cartTask);
+      if (needsFavSync) wait.push(favTask);
+      if (wait.length) await Promise.all(wait);
+    } else {
+      syncGuestCartAndFavorites();
+    }
+
+    if (userBefore !== (currentUser ? currentUser.email : null)) {
+      injectLayout();
+      setupDrawer();
+      setupProfileMenu();
+      bindLogoutButtons();
+      updateCartBadge();
+      updateFavoritesBadge();
+    }
+
+    const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites, profile:initProfile }[page];
+    if (init) {
+      try { await init(); }
+      catch (e) { console.error(e); toast(e.message || 'Page error'); }
+    }
+    bindLogoutButtons();
+    applyReveal();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
+  window.Flora = { addToCart, fmt, toast, api };
+})();

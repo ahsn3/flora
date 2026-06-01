@@ -1,6 +1,8 @@
 (function () {
   'use strict';
 
+  document.documentElement.classList.add('flora-booting');
+
   const CURRENCY = { symbol: '₺', code: 'TRY' };
   const fmt = (n) => CURRENCY.symbol + Number(n || 0).toLocaleString('tr-TR');
   const WRAP_BASIC = 75, WRAP_LUX = 150, CARD_COST = 100, DELIVERY = 300;
@@ -228,9 +230,10 @@
     return 'index.html';
   }
 
-  function authGateUrl(intent) {
+  function authPageUrl(mode, intent) {
     const ret = intent === 'checkout' ? 'checkout.html' : authReturnPath();
-    return `auth.html?return=${encodeURIComponent(ret)}&intent=${encodeURIComponent(intent || 'save')}`;
+    const m = mode === 'register' ? 'register' : 'login';
+    return `auth.html?mode=${m}&return=${encodeURIComponent(ret)}&intent=${encodeURIComponent(intent || 'save')}`;
   }
 
   const AUTH_GATE_COPY = {
@@ -262,22 +265,34 @@
         <span class="material-symbols-outlined text-6xl text-primary/35 mb-5 block">${copy.icon}</span>
         <h2 class="font-display text-headline-md text-on-surface mb-3">${pageTitle}</h2>
         <p class="text-on-surface-variant mb-8 leading-relaxed">${copy.body}</p>
-        <a class="bg-primary text-on-primary px-8 py-4 rounded-full font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition inline-block" href="${authGateUrl(feature)}">Sign in or create account</a>
+        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+          <a class="bg-primary text-on-primary px-8 py-3.5 rounded-full font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition inline-block text-center" href="${authPageUrl('login', feature)}">Log in</a>
+          <a class="border-2 border-primary text-primary px-8 py-3.5 rounded-full font-label text-label-sm uppercase tracking-widest hover:bg-primary/5 transition inline-block text-center" href="${authPageUrl('register', feature)}">Create account</a>
+        </div>
         <p class="text-sm text-on-surface-variant mt-6"><a href="shop.html" class="text-primary hover:underline font-label text-label-sm">Continue browsing</a></p>
       </div>`;
+  }
+
+  function closeAuthGate() {
+    const gate = document.getElementById('authGate');
+    if (gate) gate.hidden = true;
+    document.body.style.overflow = '';
   }
 
   function bindAuthGateEvents() {
     const gate = document.getElementById('authGate');
     if (!gate) return;
-    const close = () => {
-      gate.hidden = true;
-    };
-    gate.querySelector('[data-auth-gate-close]')?.addEventListener('click', close);
-    gate.querySelector('.auth-gate__backdrop')?.addEventListener('click', close);
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !gate.hidden) close();
+    gate.querySelectorAll('[data-auth-gate-close]').forEach((btn) => {
+      btn.addEventListener('click', closeAuthGate);
     });
+    gate.querySelector('.auth-gate__backdrop')?.addEventListener('click', closeAuthGate);
+    if (!window._authGateEscapeBound) {
+      window._authGateEscapeBound = true;
+      document.addEventListener('keydown', (e) => {
+        const g = document.getElementById('authGate');
+        if (e.key === 'Escape' && g && !g.hidden) closeAuthGate();
+      });
+    }
   }
 
   function openAuthGate(intent) {
@@ -298,14 +313,19 @@
         </button>
         <div class="text-center">
           <span class="material-symbols-outlined text-5xl text-primary/40 mb-4 block">${copy.icon}</span>
-          <h2 id="authGateTitle" class="font-display text-2xl text-primary mb-3">${copy.title}</h2>
-          <p class="text-on-surface-variant text-sm leading-relaxed mb-8">${copy.body}</p>
-          <a href="${authGateUrl(intent)}" class="block w-full bg-primary text-on-primary py-4 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition mb-3">Sign in or create account</a>
-          <button type="button" class="w-full text-on-surface-variant text-sm hover:text-primary transition font-label text-label-sm" data-auth-gate-close>Continue browsing</button>
+          <h2 id="authGateTitle" class="font-display text-2xl text-primary mb-2">${copy.title}</h2>
+          <p class="text-on-surface-variant text-sm leading-relaxed mb-6">${copy.body}</p>
+          <p class="text-xs font-label uppercase tracking-widest text-on-surface-variant mb-4">Account required</p>
+          <div class="flex flex-col gap-3">
+            <a href="${authPageUrl('login', intent)}" class="block w-full bg-primary text-on-primary py-3.5 rounded-lg font-label text-label-sm uppercase tracking-widest hover:opacity-90 transition text-center">Log in</a>
+            <a href="${authPageUrl('register', intent)}" class="block w-full border-2 border-primary text-primary py-3.5 rounded-lg font-label text-label-sm uppercase tracking-widest hover:bg-primary/5 transition text-center">Create account</a>
+          </div>
+          <button type="button" class="w-full mt-5 text-on-surface-variant text-sm hover:text-primary transition font-label text-label-sm" data-auth-gate-close>Not now</button>
         </div>
       </div>`;
     bindAuthGateEvents();
     gate.hidden = false;
+    document.body.style.overflow = 'hidden';
   }
 
   function requireLogin(intent) {
@@ -2059,7 +2079,12 @@
     applyReveal();
   }
 
-  function initAuth() { renderAuth(); }
+  function initAuth() {
+    const mode = new URLSearchParams(location.search).get('mode');
+    if (mode === 'register') authMode = 'register';
+    else if (mode === 'login') authMode = 'login';
+    renderAuth();
+  }
 
   let profilePasswordStep = 'idle'; // idle | code-sent | done
 
@@ -2545,10 +2570,28 @@
     syncFavoriteIcons();
   }
 
-  async function boot() {
+  function mountShell() {
     injectLayout();
     setupDrawer();
     setupProfileMenu();
+    document.documentElement.classList.remove('flora-booting');
+    document.documentElement.classList.add('flora-ready');
+  }
+
+  function refreshNavBadges() {
+    updateCartBadge();
+    updateFavoritesBadge();
+    syncFavoriteIcons();
+  }
+
+  function runSessionSyncInBackground() {
+    if (getSessionType() === SessionType.USER) {
+      return Promise.all([ensureCartReady(), ensureFavoritesReady()]).then(refreshNavBadges).catch(() => {});
+    }
+    return syncGuestCartAndFavorites();
+  }
+
+  async function boot() {
     bindLogoutButtons();
     applyReveal();
 
@@ -2558,24 +2601,28 @@
 
     await refreshSession().catch(() => {});
 
-    const sessionWork = getSessionType() === SessionType.USER
-      ? Promise.all([ensureCartReady(), ensureFavoritesReady()])
-      : syncGuestCartAndFavorites();
+    if (userBefore !== (currentUser ? currentUser.email : null)) {
+      mountShell();
+      bindLogoutButtons();
+    }
 
+    const sessionBg = runSessionSyncInBackground();
     const productsWork = needsProducts ? ensureProducts().catch(() => []) : Promise.resolve();
-    await Promise.all([sessionWork, productsWork]);
 
-    updateCartBadge();
-    updateFavoritesBadge();
-    syncFavoriteIcons();
+    if (page === 'home' || page === 'shop') {
+      await productsWork;
+      refreshNavBadges();
+    } else {
+      await Promise.all([sessionBg, productsWork]);
+      refreshNavBadges();
+    }
 
     if (userBefore !== (currentUser ? currentUser.email : null)) {
-      injectLayout();
+      mountShell();
       setupDrawer();
       setupProfileMenu();
       bindLogoutButtons();
-      updateCartBadge();
-      updateFavoritesBadge();
+      refreshNavBadges();
     }
 
     const init = { home:initHome, shop:initShop, product:initProduct, cart:initCart, checkout:initCheckout, events:initEvents, auth:initAuth, orders:initOrders, admin:initAdmin, contact:initContact, favorites:initFavorites, profile:initProfile }[page];
@@ -2587,11 +2634,8 @@
     applyReveal();
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
+  mountShell();
+  boot();
 
   window.Flora = { addToCart, fmt, toast, api };
 })();
